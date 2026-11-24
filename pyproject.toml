@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phaneris-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Use Phaneris from a terminal: your disclosures, reports, scoring and questions, with your account's access."
 readme = "README.md"
 requires-python = ">=3.10"

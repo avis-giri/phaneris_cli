@@ -88,3 +88,13 @@ def _file_tokens():
             return json.load(fh)
     except (OSError, ValueError):
         return {}
+
+
+def where_kept(server):
+    """keychain, file (only this user can read it), file-open (others can read it), or none."""
+    if _keychain() and _keychain_read(server):
+        return "keychain"
+    if server in _file_tokens():
+        mode = stat.S_IMODE(os.stat(TOKEN_FILE).st_mode)
+        return "file" if not mode & 0o077 else "file-open"
+    return "none"
