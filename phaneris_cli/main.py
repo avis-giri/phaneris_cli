@@ -31,6 +31,7 @@ Account
   logout                end this sign-in
   whoami [--banner]     who you are signed in as
   version               this program's version and the server's
+  history [--clear]     what you ran in the command bar, used for Tab suggestions
   doctor                check Python, the server, your sign-in and where it is kept
 
 Disclosures and reports
@@ -52,7 +53,16 @@ Knowledge graph (Phaneron)
   graph record NODE --disclosure ID    one record and what it links to
   graph related NODE --disclosure ID   the records one step from it
 
-Options for every command: --json (machine-readable), --no-color, --server URL.
+Functions: phaneris <SUBJECT> <CODE>, or phaneris go "<SUBJECT> <CODE>"
+  A subject is a disclosure id, a patent number (US 8916381), a "person or owner", a patent class (A61K),
+  or a record id from another screen. With no words, phaneris opens the command bar.
+  DES   what it is              SCR   scores, deal stages, Real or Inferred
+  WHY   what moves the score    CMP   comparables and how far they got
+  GRF   neighbourhood map       ASK   a conversation about it
+  PORT  my office's board       HELP  what applies to a subject
+  Examples: phaneris T-000003 SCR    phaneris "Carl H. June" GRF    phaneris PORT
+
+Options for every command: --json (machine-readable), --no-color, --theme phaneris|amber, --server URL.
 Run "phaneris COMMAND --help" for a command's options. Documentation: https://www.phaneris.co/docs/terminal
 """
 
@@ -64,7 +74,7 @@ class Out:
     def __init__(self, args):
         self.as_json = args.json
         self.no_color = args.json or args.no_color
-        self.s = Style(color=False if self.no_color else None)
+        self.s = Style(color=False if self.no_color else None, theme=getattr(args, "theme", None))
 
     def data(self, value, text=None):
         """JSON with --json, otherwise the readable text (a string, or a function that prints it)."""
@@ -112,26 +122,31 @@ def remember(**values):
     store.write_config(cfg)
 
 
+HINTS = {
+    "browser_only": "Open the console in a browser for this.",
+    "question_limit": "See what is left with: phaneris usage. More: phaneris buy",
+    "lookup_limit": "The limit resets within the hour.",
+    "disclosure_required": "Add --disclosure ID (see: phaneris disclosures).",
+    "password_change_required": "Sign in once at the console in a browser, choose your password, then run: phaneris login",
+    "out_of_reach": "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph",
+}
+
+
+def explain(e):
+    """A server error as a message and the next step."""
+    if e.status == 0:
+        return Fail(e.message, "Check your network, then run: phaneris doctor")
+    if e.status == 401:
+        return Fail(e.message, "Your sign-in may have ended. Run: phaneris login")
+    return Fail(e.message, HINTS.get(e.code))
+
+
 def api_errors(fn):
     def run(args, out):
         try:
             fn(args, out)
         except ApiError as e:
-            if e.status == 0:
-                fail(e.message, "Check your network, then run: phaneris doctor")
-            if e.status == 401:
-                fail(e.message, "Your sign-in may have ended. Run: phaneris login")
-            if e.code == "browser_only":
-                fail(e.message, "Open the console in a browser for this.")
-            if e.code == "question_limit":
-                fail(e.message, "See what is left with: phaneris usage. More: phaneris buy")
-            if e.code == "lookup_limit":
-                fail(e.message, "The limit resets within the hour.")
-            if e.code == "disclosure_required":
-                fail(e.message, "Add --disclosure ID (see: phaneris disclosures).")
-            if e.code == "password_change_required":
-                fail(e.message, "Sign in once at the console in a browser, choose your password, then run: phaneris login")
-            fail(e.message)
+            raise explain(e) from None
 
     return run
 
@@ -378,6 +393,23 @@ def cmd_doctor(args, out):
     out.data(checks, text)
     if not all(c["ok"] for c in checks if c["check"] != "Sign-in"):
         sys.exit(1)
+
+
+def cmd_history(args, out):
+    from . import history
+
+    if args.clear:
+        history.clear()
+        return out.data({"cleared": True}, "The command bar history is empty.")
+    lines = history.load()
+    ranked = history.ranked(lines)
+    out.data(
+        {"file": history.path(), "lines": lines, "most_used_first": ranked},
+        lambda: (
+            print("\n".join(lines[-20:]) if lines else "Nothing yet. The command bar keeps what you run there (never your questions)."),
+            lines and print(out.s.dim(f"\n{len(lines)} kept in {history.path()}, at most 500. Empty it with: phaneris history --clear")),
+        ),
+    )
 
 
 # ------------------------------------------------------------------ disclosures and reports
@@ -763,6 +795,7 @@ def build_parser():
     p.add_argument("--server", help=f"the Phaneris site (default {DEFAULT_SERVER}, or PHANERIS_URL)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-color", action="store_true", help="no color or symbols")
+    p.add_argument("--theme", choices=("phaneris", "amber"), help="colors: phaneris (default) or amber on black (or PHANERIS_THEME)")
     sub = p.add_subparsers(dest="command", required=True, parser_class=argparse.ArgumentParser)
 
     s = sub.add_parser("login", help="sign in")
@@ -779,6 +812,9 @@ def build_parser():
     s.set_defaults(fn=cmd_whoami)
     sub.add_parser("version", help="client and server versions").set_defaults(fn=cmd_version)
     sub.add_parser("doctor", help="check this setup").set_defaults(fn=cmd_doctor)
+    s = sub.add_parser("history", help="what you ran in the command bar (used for Tab suggestions)")
+    s.add_argument("--clear", action="store_true", help="empty it")
+    s.set_defaults(fn=cmd_history)
 
     s = sub.add_parser("disclosures", help="your office's disclosures")
     s.add_argument("action", nargs="?", choices=("list", "show"), default="list")
@@ -818,7 +854,72 @@ def build_parser():
     return p
 
 
+SUBCOMMANDS = (
+    "login",
+    "logout",
+    "whoami",
+    "version",
+    "doctor",
+    "history",
+    "disclosures",
+    "report",
+    "score",
+    "jobs",
+    "ask",
+    "usage",
+    "buy",
+    "graph",
+    "go",
+)
+
+
+def global_options(argv):
+    """The options that come before a subject or command, and the words after them."""
+    g = argparse.ArgumentParser(add_help=False)
+    g.add_argument("--server")
+    g.add_argument("--json", action="store_true")
+    g.add_argument("--no-color", action="store_true")
+    g.add_argument("--theme", choices=("phaneris", "amber"))
+    g.add_argument("--disclosure")
+    known, rest = g.parse_known_args(argv)
+    return known, rest
+
+
+def run_functions(argv):
+    """`phaneris <SUBJECT> <CODE>`, `phaneris go "<SUBJECT> <CODE>"`, or the command bar with no words."""
+    import shlex
+
+    from . import term
+
+    args, words = global_options(argv)
+    out = Out(args)
+    if words and words[0] == "go":
+        words = shlex.split(" ".join(words[1:]))
+    if not words:
+        if sys.stdin.isatty() and sys.stdout.isatty() and not args.json:
+            try:
+                ctx = term.Ctx(signed_in(args), out, args)
+            except Fail as f:
+                Fail_and_exit(out, f)
+            return term.command_bar(ctx)
+        print(HELP)
+        return
+    try:
+        ctx = term.Ctx(signed_in(args), out, args)
+        term.run(ctx, words)
+    except Fail as f:
+        Fail_and_exit(out, f)
+    except ApiError as e:
+        Fail_and_exit(out, explain(e))
+    except KeyboardInterrupt:
+        Fail_and_exit(out, Fail("stopped.", code=130))
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    _, words = global_options(argv)
+    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] == "go":
+        return run_functions(argv)
     args = build_parser().parse_args(argv)
     out = Out(args)
     if args.command == "score":
@@ -837,7 +938,7 @@ def main(argv=None):
         Fail_and_exit(out, Fail("stopped.", code=130))
 
 
-def Fail_and_exit(out, f):  # noqa: N802
+def Fail_and_exit(out, f, exit=True):  # noqa: N802
     s = Style(color=False if out.no_color else None, stream=sys.stderr)
     if out.as_json:
         print(json.dumps({"error": f.message, **({"next": f.hint} if f.hint else {})}), file=sys.stderr)
@@ -845,7 +946,8 @@ def Fail_and_exit(out, f):  # noqa: N802
         print(f"{s.bad('error:')} {f.message}", file=sys.stderr)
         if f.hint:
             print(f"{s.dim('next:')} {f.hint}", file=sys.stderr)
-    sys.exit(f.code)
+    if exit:
+        sys.exit(f.code)
 
 
 if __name__ == "__main__":

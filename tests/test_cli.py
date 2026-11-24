@@ -48,6 +48,81 @@ SUMMARY = {
     "facts": {"measured": 6, "total": 15},
     "not_measured": [{"metric": "Capital path", "fact": f"fact {i}", "reason": "Inferred, placeholder from the report plan"} for i in range(12)],
     "scale": "Scores run from 0 to 1; 0.5 is the middle of earlier comparable records.",
+    "stages": {"leaves": {"out": 0.05, "licensed": 0.01, "spinout": 0.04, "maintained": 0.6, "inactive": 0.35}, "intervals": {}},
+    "distribution": {"max": 0.15, "counts": [1, 4, 9, 6, 3, 2, 1, 0, 1, 0], "records": 27, "above": 2},
+    "comparables": {
+        "closest": [
+            {
+                "title": "An earlier record",
+                "institution": "Somewhere",
+                "as_of": "2004-04-19",
+                "outcome": "licensed",
+                "weight": 2.2,
+                "text_similarity": 0.8,
+            },
+            {
+                "title": "Another earlier record",
+                "institution": "Elsewhere",
+                "as_of": "1999-01-01",
+                "outcome": "inactive",
+                "weight": 1.1,
+                "text_similarity": 0.9,
+            },
+        ],
+        "lookalikes": {
+            "fto": [{"number": "9283184", "title": "A look-alike patent", "filed": "2011-08-16", "owner": "An owner", "status": "Patented Case"}],
+            "ms": [{"nct": "NCT01428492", "title": "A trial", "status": "Completed"}],
+        },
+    },
+}
+DRIVERS = {
+    "id": "T-1",
+    "name": "Test one",
+    "available": True,
+    "deal_chance": 0.05,
+    "baseline": {"log_odds": -3.0, "deal_chance": 0.0474},
+    "terms": [
+        {"input": "ia", "label": "Inventor alignment score", "contribution": 0.2},
+        {"input": "tf", "label": "Translational funding score", "contribution": -0.144},
+    ],
+    "check": {"model_log_odds": -2.944, "model_deal_chance": 0.05, "difference": 0.0},
+    "against_middle": [{"metric": "ipd", "label": "IP defensibility", "measured": True, "log_odds_change": 0.1, "deal_chance_at_middle": 0.045}],
+    "inputs_note": "The model reads its own metric scores.",
+    "assumed": {
+        "coefficient": 0.8,
+        "note": "An assumption, not a fitted model.",
+        "terms": [{"metric": "cp", "label": "Capital path", "score": 0.5, "kind": "inferred", "log_odds": 0.0}],
+    },
+    "missing": [{"metric": "IP defensibility", "fact": "Family size", "reason": "Patent family source not connected"}],
+    "missing_note": "Facts in the four modelled metrics change the deal chance through the fitted model.",
+}
+BOARD = {
+    "office": "aldermoor",
+    "disclosures": [
+        {
+            "id": "T-1",
+            "name": "Test one",
+            "deal_chance": {"real_data": 0.05},
+            "recommendation": "Review",
+            "flags_raised": ["Ownership"],
+            "checks_raised": ["Ownership"],
+            "real_share": 0.56,
+            "metrics": [{"id": "ipd", "name": "IP", "score": 0.52, "kind": "real"}, {"id": "cp", "name": "CP", "score": 0.5, "kind": "inferred"}],
+        }
+    ],
+}
+MAP = {
+    "graph": "phaneron",
+    "center": {"id": "inv:a", "type": "inventor", "name": "Ada Shared"},
+    "groups": {
+        "people": {
+            "one": [{"id": "inv:c", "type": "inventor", "name": "Cy Third", "relation": "co_inventor"}],
+            "two": [{"id": "inv:b", "type": "inventor", "name": "Bo Second", "via": "pat:2", "relation": "invented_by"}],
+        },
+        "disclosures": {"one": [{"id": "T-1", "type": "asset", "name": "Test one", "relation": "protected_by"}], "two": []},
+    },
+    "totals": {"people": {"one": 1, "two": 1}, "disclosures": {"one": 1, "two": 0}},
+    "per_group": 12,
 }
 
 
@@ -55,6 +130,7 @@ class Fake(BaseHTTPRequestHandler):
     log = []
     approved = False
     role = "client"
+    drivers = DRIVERS
     quota = {"unlimited": False, "kind": "disclosure", "limit": 10, "window_hours": 12, "free_left": 9, "credits": 0, "remaining": 9}
 
     def log_message(self, *a):
@@ -90,6 +166,14 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, CONSOLE)
         if url.path == "/api/disclosures/T-1/summary":
             return self._send(200, {"summary": SUMMARY})
+        if url.path == "/api/disclosures/T-1/drivers":
+            return self._send(200, {"drivers": Fake.drivers})
+        if url.path == "/api/board":
+            return self._send(200, BOARD)
+        if url.path == "/api/graph/map":
+            if "disclosure" not in q and Fake.role != "admin":
+                return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
+            return self._send(200, MAP)
         if url.path == "/api/explore/usage":
             return self._send(
                 200, {"quota": Fake.quota, "graph_quota": {**Fake.quota, "kind": "graph", "limit": 5, "window_hours": None}, "pack_requested": False}
@@ -116,10 +200,13 @@ class Fake(BaseHTTPRequestHandler):
             if "disclosure" not in q and Fake.role != "admin":
                 return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
             if url.path == "/api/graph/search":
-                return self._send(
-                    200, {"total": 1, "records": [{"id": "inv:a", "type": "inventor", "name": "Ada Shared", "cite": "graph:phaneron:inv:a"}]}
-                )
+                hits = [{"id": "inv:a", "type": "inventor", "name": "Ada Shared", "cite": "graph:phaneron:inv:a"},
+                        {"id": "inv:z", "type": "inventor", "name": "Ada Other", "cite": "graph:phaneron:inv:z"}]  # fmt: skip
+                hits = [h for h in hits if q["q"].lower() in h["name"].lower()]
+                return self._send(200, {"total": len(hits), "records": hits})
             if url.path == "/api/graph/record":
+                if q["node"] == "pat:999999":
+                    return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
                 return self._send(
                     200,
                     {
@@ -181,7 +268,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "TOKEN_FILE", str(tmp_path / "token.json"))
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    Fake.log, Fake.approved, Fake.role = [], False, "client"
+    Fake.log, Fake.approved, Fake.role, Fake.drivers = [], False, "client", DRIVERS
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", tmp_path
@@ -408,3 +495,251 @@ def test_json_and_no_color_print_no_escape_codes(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     assert "\033" not in run(capsys, "--no-color", "disclosures", "show", "T-1")
     assert "\033" not in run(capsys, "--json", "usage")
+
+
+# ------------------------------------------------------------ subjects and function codes
+
+
+def test_grammar():
+    from phaneris_cli.term import parse
+
+    assert parse(["T-1", "scr"]) == ("T-1", "SCR", {})
+    assert parse(["PORT"]) == ("", "PORT", {})
+    assert parse(["Ada Shared", "GRF"]) == ("Ada Shared", "GRF", {})
+    assert parse(['"Ada', 'Shared"', "des"]) == ("Ada Shared", "DES", {})
+    assert parse(["T-1"]) == ("T-1", "DES", {})
+    assert parse([]) == ("", "HELP", {})
+    assert parse(["T-1", "CMP", "--sort", "date"]) == ("T-1", "CMP", {"sort": "date"})
+    assert parse(["T-1 scr"]) == ("T-1", "SCR", {})
+    assert parse(["Ada Shared GRF"]) == ("Ada Shared", "GRF", {})
+
+
+def test_scr_draws_stages_metrics_and_the_strip(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "scr")
+    for part in ("Deal chance, real data", "range 4.0% to 6.0%", "59th percentile", "2 above 15%", "Deal stages", "Spin-out", "Inactive",
+                 "IP defensibility", "Real", "Inferred", "6 of 15 facts measured", "Checks: Term clear"):  # fmt: skip
+        assert part in out, part
+    assert json.loads(run(capsys, "--json", "T-1", "SCR"))["stages"]["leaves"]["out"] == 0.05
+
+
+def test_why_shows_the_models_terms_and_says_when_it_cannot(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "WHY")
+    assert "Inventor alignment score" in out and "+0.20" in out and "Sum: -3.00 +0.06 = -2.94" in out and "stored: 5.00%" in out
+    assert "If a modelled metric were the middle" in out and "not fitted" in out and "Family size" in out
+    monkeypatch.setattr(Fake, "drivers", {**DRIVERS, "available": False, "why_not_available": "scored with another model"})
+    out = run(capsys, "T-1", "WHY")
+    assert "not shown: scored with another model" in out and "Nothing is estimated" in out and "Sum:" not in out
+
+
+def test_cmp_sorts_and_lists_look_alikes(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "CMP", "--sort", "date")
+    assert out.index("Another earlier record") < out.index("An earlier record") and "licensed" in out
+    assert "9283184" in out and "NCT01428492" in out and "Trial" in out
+
+
+def test_grf_draws_the_neighbourhood_with_ids(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    assert "around one of your disclosures" in failed(capsys, "Ada Shared", "GRF")  # office users: bounded to a disclosure
+    run(capsys, "T-1", "DES")
+    out = run(capsys, "Ada Shared", "GRF")
+    assert "people" in out and "inv:c" in out and "inv:b" in out and "via pat:2" in out and "T-1" in out
+    assert [x for x in Fake.log if x[1] == "/api/graph/map"][-1][2]["disclosure"] == "T-1"
+
+
+def test_port_board(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "PORT")
+    assert "Test one" in out and "5.0%" in out and "5/9" in out and out.count("Ownership") == 1
+    assert "Only your office" in run(capsys, "PORT", "--all")
+
+
+def test_subjects_resolve_through_the_server(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    assert "Test one" in run(capsys, "US 123", "DES")  # a patent of one of my disclosures opens the disclosure (and sets the context)
+    assert "A patent" in run(capsys, "US 456789", "DES")  # another patent opens its record
+    assert "not within reach" in failed(capsys, "999999", "DES")
+    assert "Ada Shared" in run(capsys, "Ada Shared", "DES")
+    err = failed(capsys, "Ada", "DES")  # two matches and no terminal to pick on
+    assert "matches 2 records" in err and "inv:a" in err and "inv:z" in err
+    assert "does not apply" in failed(capsys, "Ada Shared", "SCR")
+
+
+def test_go_and_help(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    assert "Deal stages" in run(capsys, "go", "t-1 scr")
+    out = run(capsys, "HELP")
+    assert all(c in out for c in ("DES", "SCR", "WHY", "CMP", "GRF", "ASK", "PORT")) and "for a disclosure" in out
+    assert "PORT" not in run(capsys, "T-1", "HELP")
+
+
+def test_no_words_without_a_terminal_prints_help(capsys, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    cli.main([])
+    assert "Functions: phaneris <SUBJECT> <CODE>" in capsys.readouterr().out
+
+
+def test_ask_code_opens_the_conversation(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    answers = iter(["What is it?", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    run(capsys, "T-1", "ASK")
+    assert [x for x in Fake.log if x[1] == "/api/explore"][-1][2]["scope"] == {"kind": "disclosure", "disclosure": "T-1"}
+
+
+@pytest.mark.parametrize("cols", [60, 100, 160])
+def test_screens_fit_the_terminal(server, capsys, monkeypatch, cols):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    monkeypatch.setenv("COLUMNS", str(cols))
+    for words in (["T-1", "SCR"], ["T-1", "WHY"], ["T-1", "CMP"], ["T-1", "DES"], ["Ada Shared", "GRF"], ["PORT"], ["HELP"]):
+        out = run(capsys, *words)
+        assert max(len(line) for line in out.splitlines()) <= cols, (words, cols)
+
+
+def test_themes_and_no_color(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    amber = Style(color=True, stream=TTY(), theme="amber")
+    line = amber.line(amber.bold("Deal chance"))
+    assert "48;2;0;0;0" in line and "255;176;0" in line  # amber on black
+    assert "48;2" not in Style(color=True, stream=TTY(), theme="phaneris").line("x")
+    monkeypatch.setenv("PHANERIS_THEME", "amber")
+    assert Style(color=True, stream=TTY()).theme == "amber"
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert not Style(stream=TTY()).color
+    assert "\033" not in run(capsys, "--theme", "amber", "T-1", "SCR")  # not a terminal: plain text
+
+
+def test_command_bar_runs_codes_and_survives_errors(server, capsys, monkeypatch):
+    import argparse
+
+    from phaneris_cli import term
+
+    url = signed(server, capsys, monkeypatch)
+    lines = iter(["?", "T-1 SCR", "Ada Shared SCR", "", "PORT"])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    args = argparse.Namespace(server=url, json=False, no_color=True, theme=None, disclosure=None, cites=False)
+    out = cli.Out(args)
+    term.command_bar(term.Ctx(cli.signed_in(args), out, args))
+    captured = capsys.readouterr()
+    assert "Functions" in captured.out and "Deal stages" in captured.out and "Test one" in captured.out
+    assert "does not apply" in captured.err  # an error is shown and the bar carries on
+
+
+# ------------------------------------------------------------ command bar history and suggestions
+
+
+def test_ranking_puts_frequent_and_recent_first():
+    from phaneris_cli import history
+
+    assert history.ranked(["A SCR", "B SCR", "A SCR"])[0] == "A SCR"  # used twice
+    assert history.ranked(["X DES", "Y DES"])[0] == "Y DES"  # same use, newer first
+    codes = ["DES", "SCR", "WHY", "CMP", "GRF", "ASK", "PORT", "HELP"]
+    got = history.suggestions("T-1 ", ["T-1 WHY", "T-1 SCR", "T-1 SCR"], codes, ["T-100046"])
+    assert got[:2] == ["T-1 SCR", "T-1 WHY"]  # whole lines from history first, most used first
+    assert "T-1 DES" in got  # then codes for the word being typed
+    assert history.suggestions("sc", [], codes, [])[0] == "SCR"
+    assert history.suggestions("T-10", ["T-1 SCR"], codes, ["T-100046"]) == ["T-100046"]  # session subjects last
+    assert history.suggestions("", ["a DES", "b DES", "c DES"], codes, []) == ["c DES", "b DES", "a DES"]  # empty line: last commands
+
+
+def test_history_file_is_private_bounded_and_free_of_secrets(server, capsys, monkeypatch, tmp_path):
+    from phaneris_cli import history
+
+    for line in ("T-1 SCR", "phc_abcdef SCR", "my password is x", "A" * 40, "?", "  "):
+        history.add(line)
+    assert history.load() == ["T-1 SCR"]
+    assert stat.S_IMODE(os.stat(history.path()).st_mode) == 0o600
+    for i in range(510):
+        history.add(f"T-{i} DES")
+    assert len(history.load()) == 500 and history.load()[-1] == "T-509 DES"
+    assert "empty" in run(capsys, "history", "--clear") and history.load() == []
+
+
+def test_questions_in_a_conversation_are_never_kept(server, capsys, monkeypatch):
+    import argparse
+
+    from phaneris_cli import history, term
+
+    url = signed(server, capsys, monkeypatch)
+    lines = iter(["T-1 ASK", "a private question about money", "", "PORT"])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    args = argparse.Namespace(server=url, json=False, no_color=True, theme=None, disclosure=None, cites=False)
+    term.command_bar(term.Ctx(cli.signed_in(args), cli.Out(args), args))
+    kept = history.load()
+    assert kept == ["T-1 ASK", "PORT"] and not any("question" in x for x in kept)
+    assert "a private question about money" in [x[2].get("question") for x in Fake.log if x[1] == "/api/explore"]  # it was asked
+
+
+def test_the_bar_works_without_readline(server, capsys, monkeypatch):
+    import argparse
+    import sys
+
+    from phaneris_cli import term
+
+    url = signed(server, capsys, monkeypatch)
+    monkeypatch.setitem(sys.modules, "readline", None)  # import readline now fails
+    lines = iter(["T-1 DES"])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    args = argparse.Namespace(server=url, json=False, no_color=True, theme=None, disclosure=None, cites=False)
+    term.command_bar(term.Ctx(cli.signed_in(args), cli.Out(args), args))
+    assert "Test one" in capsys.readouterr().out
+
+
+def test_editor_ghost_text_tab_and_keys():
+    from phaneris_cli.editor import Editor, common_prefix
+
+    shown = []
+    options = ["T-1 SCR", "T-1 SAY", "T-100046 DES"]
+    ed = Editor("> ", lambda t: [o for o in options if o.lower().startswith(t.lower())], ["PORT", "T-1 WHY"], lambda g: f"<{g}>", shown.append)
+    for k in "T-1 S":
+        ed.key(k)
+    assert ed.ghost() == "CR" and "<CR>" in shown[-1]  # the best suggestion shows after the cursor
+    ed.key("\x1b[C")  # Right arrow takes it
+    assert ed.buf == "T-1 SCR"
+    ed.key("\x15")  # Ctrl-U clears
+    for k in "T-1":
+        ed.key(k)
+    ed.key("\t")  # several matches: list them, best first, and grow to what they share
+    assert "  T-1 SCR\r\n  T-1 SAY" in shown[-2] and ed.buf == "T-1"
+    ed.key("\t")  # Tab again takes the best
+    assert ed.buf == "T-1 SCR"
+    assert ed.key("\r") == "T-1 SCR"
+    ed2 = Editor("> ", lambda t: [], ["PORT", "T-1 WHY"], str, shown.append)
+    ed2.key("\x1b[A")
+    assert ed2.buf == "T-1 WHY"  # Up: the last command
+    ed2.key("\x15")
+    with pytest.raises(EOFError):
+        ed2.key("\x04")  # Ctrl-D on an empty line leaves
+    assert common_prefix(["T-1 SCR", "t-1 say"]) == "T-1 S"
+
+
+def test_ghost_text_only_on_a_color_terminal(monkeypatch):
+    from phaneris_cli import editor
+
+    monkeypatch.setenv("TERM", "dumb")
+    assert editor.available() is False
