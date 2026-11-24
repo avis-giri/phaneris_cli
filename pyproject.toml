@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phaneris-cli"
+version = "0.1.0"
+description = "Use Phaneris from a terminal: your disclosures, reports, scoring and questions, with your account's access."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+license = { text = "Proprietary" }
+
+[project.scripts]
+phaneris = "phaneris_cli.main:main"
+
+[tool.setuptools]
+packages = ["phaneris_cli"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
