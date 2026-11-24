@@ -9,7 +9,7 @@ allows your account; the command line adds no access of its own.
 Needs Python 3.10 or newer.
 
 ```bash
-pipx install git+https://github.com/YOUR-ORG/phaneris-cli
+pipx install git+https://github.com/avis-giri/phaneris_cli
 ```
 
 (or `pip install --user .` from a copy of this folder). It has no other dependencies.
