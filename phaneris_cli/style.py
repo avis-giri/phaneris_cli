@@ -83,9 +83,10 @@ class Style:
     def wrap(self, text, indent=""):
         return textwrap.fill(str(text), width=self.width, initial_indent=indent, subsequent_indent=indent)
 
-    def table(self, rows, headers, color_cols=None):
-        """Aligned columns. The widest text column is cut with an ellipsis when the table is wider than the terminal.
-        `color_cols` maps a column index to a function applied after padding (so colors do not break alignment)."""
+    def table(self, rows, headers, color_cols=None, shrink=None):
+        """Aligned columns. When the table is wider than the terminal, column `shrink` (default: the widest) is cut with
+        an ellipsis, so identifiers needed for the next command stay whole. `color_cols` maps a column index to a
+        function applied after padding (so colors do not break alignment)."""
         if not rows:
             return ""
         color_cols = color_cols or {}
@@ -94,7 +95,7 @@ class Style:
         gap = 2
         over = sum(widths) + gap * (len(widths) - 1) - self.width
         if over > 0:
-            widest = max(range(len(widths)), key=lambda i: widths[i])
+            widest = shrink if shrink is not None else max(range(len(widths)), key=lambda i: widths[i])
             widths[widest] = max(len(headers[widest]), widths[widest] - over, 8)
         out = ["  ".join(self.dim(h.ljust(w)) for h, w in zip(headers, widths, strict=True)).rstrip()]
         for r in cells:

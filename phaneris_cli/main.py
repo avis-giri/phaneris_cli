@@ -233,6 +233,14 @@ def password_login(api, name, args, out):
         office = choose_office(api, out)
     try:
         got = api.post("/cli/login/password", {"username": username, "password": password, "workspace": office or None, "client_name": name})
+    except ApiError as e:
+        if e.status == 401:
+            fail(e.message, "Check the username and password. After 5 wrong tries the username waits 15 minutes.")
+        if e.status == 429:
+            fail(e.message)
+        if e.code == "workspace_not_allowed":
+            fail(e.message, "Leave out --office to use your own office.")
+        raise
     finally:
         password = None  # noqa: F841  dropped as soon as it is sent
     return got["token"]
@@ -428,7 +436,9 @@ def show_report(api, ident, args, out):
             print(f"  {'Flags raised':<26}{s.bad(', '.join(summary['flags_raised']))}")
         for g in summary.get("gates") or []:
             state = s.bad(g["state"]) if g["state"] == "raised" else g["state"]
-            print(f"  {'Check: ' + g['name']:<26}{state}  {s.dim(g.get('why') or '')}")
+            print(f"  {'Check: ' + g['name']:<26}{state}")
+            if g.get("why"):
+                print(s.dim(s.wrap(g["why"], indent=" " * 28)))
         print()
         print(s.rule("Metrics"))
         middle = "middle (0.5), nothing usable"
@@ -699,8 +709,10 @@ def cmd_graph(args, out):
             if not rows:
                 print("Nothing matched within reach." + ("" if args.disclosure is None else f" Lookups reach what {args.disclosure} connects to."))
                 return
-            graph = lambda r: (r.get("cite") or "").split(":")[1] if (r.get("cite") or "").count(":") >= 2 else ""  # noqa: E731
-            print(s.table([[r.get("id", ""), r.get("type", ""), r.get("name") or "", graph(r)] for r in rows], ["Record", "Type", "Name", "Graph"]))
+            for r in rows:
+                cite = r.get("cite") or ""
+                graph = cite.split(":")[1] if cite.count(":") >= 2 else ""
+                print(f"  {s.bold(r.get('id', ''))}  {s.dim(r.get('type', ''))}  {r.get('name') or ''}" + (s.dim(f"  in {graph}") if graph else ""))
             print(s.dim(f"\n{res.get('total', len(rows))} found. Open one with: phaneris graph record RECORD"))
 
         return out.data(res, text)
@@ -728,8 +740,11 @@ def cmd_graph(args, out):
         if not rows:
             print("No linked records within reach.")
             return
-        print(s.table([[n.get("relation", ""), n.get("direction", ""), n.get("id", ""), n.get("type", ""), n.get("name") or ""] for n in rows],
-                      ["Link", "Way", "Record", "Type", "Name"]))  # fmt: skip
+        for n in rows:
+            arrow = "→" if n.get("direction") == "out" else "←"
+            if not s.color:
+                arrow = "->" if n.get("direction") == "out" else "<-"
+            print(f"  {s.dim(n.get('relation', ''))} {arrow} {s.bold(n.get('id', ''))}  {s.dim(n.get('type', ''))}  {n.get('name') or ''}")
 
     out.data(res, text)
 
