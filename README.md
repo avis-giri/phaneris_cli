@@ -50,6 +50,7 @@ anyone's on Users.
 | `phaneris login` / `logout` | Sign in, or end this sign-in |
 | `phaneris whoami [--banner]` | Who you are signed in as (with the wordmark) |
 | `phaneris version` | This program's version and the server's |
+| `phaneris history [--clear]` | What you ran in the command bar (used for Tab suggestions); `--clear` empties it |
 | `phaneris doctor` | Check Python, the server, your sign-in and where it is kept |
 | `phaneris disclosures` | Your office's disclosures with deal chance and recommendation |
 | `phaneris disclosures show ID [--all]` | One disclosure's report: outlook, checks, every metric with Real or Inferred, facts not measured |
@@ -66,6 +67,54 @@ anyone's on Users.
 
 Every command takes `--json` for machine-readable output and `--no-color` for plain text. Color and the wordmark
 appear only on a terminal, never with `NO_COLOR` set; `PHANERIS_NO_ANIMATION=1` turns the animation off.
+
+## Functions
+
+Type a subject and a function code; the screen draws in the terminal:
+
+```bash
+phaneris T-000003 SCR          # one of your disclosures, by id, name or patent number
+phaneris "US 8916381" DES      # a patent
+phaneris "Carl H. June" GRF    # a person or an owner, in quotes
+phaneris A61K GRF              # a patent class
+phaneris PORT                  # your office's board
+phaneris go "T-000003 WHY"     # the same, as one line
+```
+
+| Code | Screen | Applies to |
+| --- | --- | --- |
+| DES | What it is: the record brief | a disclosure or a record |
+| SCR | Deal chance with its range, the percentile strip, the deal-stage tree, nine metric bars with the 0.5 middle line, Real (solid) or Inferred (shaded), flags | a disclosure |
+| WHY | What moves the deal chance: the fitted model's own terms against an average record, the change if a metric were 0.5, the full estimate's assumed part, and the facts not found | a disclosure |
+| CMP | The closest earlier records and how far they got, and the look-alike patents and trials (`--sort weight\|similarity\|date\|outcome`) | a disclosure |
+| GRF | The neighbourhood in Phaneron, one and two links out, grouped by patents, people, owners, classes, trials | a disclosure or a record |
+| ASK | A conversation about it | anything |
+| PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
+| HELP | What applies to the subject | anything |
+
+Codes are case-insensitive. A name that matches several records gives a numbered list to choose from. Records are
+looked up around the disclosure you opened last (administrators can reach the whole graph); open one first with
+`phaneris T-ID DES`.
+
+**WHY uses only the model's real numbers.** The deal chance is a fitted logistic model; the screen shows each of its
+eleven inputs' push, coefficient times the input's distance from the training average, and checks that the terms add up
+to the stored deal chance. If they do not (another model scored it), it says so and shows no split.
+
+### The command bar
+
+`phaneris` with no words on a terminal opens a prompt. Type a subject and a code and press Enter; `?` shows help;
+Ctrl-D leaves. Tab suggests from your own earlier commands first (most used and most recent first), then codes, then
+subjects you have seen; Tab on an empty line offers your last commands. On a color terminal the best suggestion shows
+dimmed after the cursor; Right arrow or Tab takes it. Up and Down walk earlier commands.
+
+What you run in the bar is kept in `~/.config/phaneris/history` (only you can read it, at most 500 lines) for these
+suggestions. Questions typed into a conversation are never kept, nor anything that looks like a password or a sign-in.
+`phaneris history` shows it; `phaneris history --clear` empties it.
+
+### Themes
+
+`--theme phaneris` (the default: the site's violet accent) or `--theme amber` (amber on black, high contrast), or set
+`PHANERIS_THEME`. Color appears only on a terminal and never with `NO_COLOR`; screens fit the terminal's width.
 
 ## What you can reach
 
@@ -84,6 +133,7 @@ appear only on a terminal, never with `NO_COLOR` set; `PHANERIS_NO_ANIMATION=1` 
 | `PHANERIS_TOKEN` | Use this sign-in instead of the stored one (for scripts; keep it out of files and shell history). |
 | `PHANERIS_NO_KEYCHAIN=1` | Keep the sign-in in the file even on macOS. |
 | `NO_COLOR`, `PHANERIS_NO_ANIMATION=1` | No color; no animation. |
+| `PHANERIS_THEME` | `phaneris` or `amber`. |
 
 ## Development
 
