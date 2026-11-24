@@ -7,6 +7,7 @@ scoring new disclosures, and questions within your allowance. Add --json to any 
 import argparse
 import json
 import os
+import platform
 import re
 import sys
 import time
@@ -150,7 +151,7 @@ def cmd_login(args, out):
     server = server_of(args)
     check_server(server)
     api = Api(server)
-    name = args.name or f"{os.environ.get('USER', 'user')} on {os.uname().nodename}"[:60]
+    name = args.name or f"{os.environ.get('USER') or os.environ.get('USERNAME') or 'user'} on {platform.node()}"[:60]
     start = api.post("/cli/login/start", {"client_name": name})
     url = f"{server}/console/cli?code={start['user_code']}"
     if not out.as_json:
