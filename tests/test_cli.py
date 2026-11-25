@@ -223,6 +223,8 @@ class Fake(BaseHTTPRequestHandler):
             )
         if url.path == "/api/reports/Phaneris_Report_T-1.pdf":
             return self._send(200, b"%PDF-1.4 test", "application/pdf")
+        if url.path == "/api/jobs/J-1/report.pdf":
+            return self._send(200, b"%PDF-1.4 made", "application/pdf")
         if url.path.startswith("/api/jobs/J-9"):
             return self._send(
                 200,
@@ -410,6 +412,13 @@ def test_report_pdf(server, capsys, monkeypatch, tmp_path):
     target = tmp_path / "r.pdf"
     assert "Saved" in run(capsys, "report", "T-1", "--pdf", str(target))
     assert target.read_bytes().startswith(b"%PDF")
+
+
+def test_report_pdf_of_a_live_disclosure_is_the_designed_one(server, capsys, monkeypatch, tmp_path):
+    signed(server, capsys, monkeypatch)
+    target = tmp_path / "live.pdf"
+    assert "Saved" in run(capsys, "report", "NEW-1", "--pdf", str(target))
+    assert target.read_bytes() == b"%PDF-1.4 made"
 
 
 def test_score_follows_the_job(server, capsys, monkeypatch, tmp_path):

@@ -55,7 +55,7 @@ anyone's on Users.
 | `phaneris doctor` | Check Python, the server, your sign-in and where it is kept |
 | `phaneris disclosures` | Your office's disclosures with deal chance and recommendation |
 | `phaneris disclosures show ID [--all]` | One disclosure's report: outlook, checks, every metric with Real or Inferred, facts not measured |
-| `phaneris report ID [--pdf FILE] [--all]` | The same report; `--pdf` saves the stored PDF when there is one |
+| `phaneris report ID [--pdf FILE] [--all]` | The same report; `--pdf` saves the designed report PDF |
 | `phaneris score FILE` / `score --example` | Enter a new disclosure from a JSON file and follow its scoring |
 | `phaneris jobs` | Your scoring jobs |
 | `phaneris ask "question" [--disclosure ID]` | Ask about one of your disclosures (default: the last one you used) |

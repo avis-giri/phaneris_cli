@@ -38,7 +38,7 @@ Account
 Disclosures and reports
   disclosures           your office's disclosures
   disclosures show ID   one disclosure's report: every score marked Real or Inferred
-  report ID [--pdf F]   the same report; --pdf saves the stored PDF
+  report ID [--pdf F]   the same report; --pdf saves the designed report PDF
   score FILE            enter a new disclosure from a JSON file and follow its scoring
   jobs                  your scoring jobs
 
@@ -503,14 +503,17 @@ def cmd_report(args, out):
     if args.pdf:
         r = resolve_disclosure(api, args.id)
         name = f"Phaneris_Report_{r['id']}.pdf"
+        if r["scored_live"]:  # scored after the data import: the server makes the same designed report (a few seconds the first time)
+            if not out.as_json and sys.stderr.isatty():
+                print(out.s.dim("Preparing the PDF..."), file=sys.stderr)
+            path = f"/jobs/{quote(r['key'])}/report.pdf"
+        else:
+            path = f"/reports/{quote(name)}"
         try:
-            content, ctype = api.get(f"/reports/{quote(name)}", raw=True)
+            content, ctype = api.get(path, raw=True)
         except ApiError as e:
             if e.status == 404:
-                fail(
-                    f"there is no stored PDF for {r['id']}.",
-                    f"Open it in the console and use Save as PDF: {api.server}/console/disclosures/{r['id']}",
-                )
+                fail(f"there is no PDF for {r['id']}.", f"Open it in the console: {api.server}/console/disclosures/{r['id']}")
             raise
         if not ctype.startswith("application/pdf"):
             fail("the server did not send a PDF.")
@@ -824,7 +827,7 @@ def build_parser():
     s.add_argument("--all", action="store_true", help="with show: list every fact not measured")
     s.set_defaults(fn=cmd_disclosures)
 
-    s = sub.add_parser("report", help="a disclosure's report; --pdf saves the stored PDF")
+    s = sub.add_parser("report", help="a disclosure's report; --pdf saves the designed report PDF")
     s.add_argument("id")
     s.add_argument("--pdf", metavar="FILE")
     s.add_argument("--all", action="store_true", help="list every fact not measured")
