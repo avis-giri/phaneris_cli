@@ -51,6 +51,7 @@ anyone's on Users.
 | `phaneris whoami [--banner]` | Who you are signed in as (with the wordmark) |
 | `phaneris version` | This program's version and the server's |
 | `phaneris history [--clear]` | What you ran in the command bar (used for Tab suggestions); `--clear` empties it |
+| `phaneris tui [SUBJECT CODE]` | Full-screen mode (needs the optional extra) |
 | `phaneris doctor` | Check Python, the server, your sign-in and where it is kept |
 | `phaneris disclosures` | Your office's disclosures with deal chance and recommendation |
 | `phaneris disclosures show ID [--all]` | One disclosure's report: outlook, checks, every metric with Real or Inferred, facts not measured |
@@ -88,6 +89,8 @@ phaneris go "T-000003 WHY"     # the same, as one line
 | WHY | What moves the deal chance: the fitted model's own terms against an average record, the change if a metric were 0.5, the full estimate's assumed part, and the facts not found | a disclosure |
 | CMP | The closest earlier records and how far they got, and the look-alike patents and trials (`--sort weight\|similarity\|date\|outcome`) | a disclosure |
 | GRF | The neighbourhood in Phaneron, one and two links out, grouped by patents, people, owners, classes, trials | a disclosure or a record |
+| OWN | Ownership and timeline: filings, grant, assignments, licences, trials, papers, with the disclosure date as a rule and later items marked as hindsight | a disclosure or a record |
+| CLS | Patent class trends: filings by year (a braille line chart), share in force, owners. For a disclosure, the class it is grouped under in the graph | a disclosure, a record or a class |
 | ASK | A conversation about it | anything |
 | PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
 | HELP | What applies to the subject | anything |
@@ -110,6 +113,36 @@ dimmed after the cursor; Right arrow or Tab takes it. Up and Down walk earlier c
 What you run in the bar is kept in `~/.config/phaneris/history` (only you can read it, at most 500 lines) for these
 suggestions. Questions typed into a conversation are never kept, nor anything that looks like a password or a sign-in.
 `phaneris history` shows it; `phaneris history --clear` empties it.
+
+### Full-screen mode
+
+Several screens side by side, keyboard first. It needs one optional extra (the plain command line does not):
+
+```bash
+pipx inject phaneris-cli textual
+# or from the start:
+pipx install "phaneris-cli[tui] @ git+https://github.com/avis-giri/phaneris_cli"
+```
+
+Then `phaneris tui` (or `phaneris tui T-000003 SCR`); with the extra installed, `phaneris` with no words opens it too.
+The bar on top takes the same subjects and codes, with the same history suggestions; Enter opens the screen as a new
+tab in the pane in focus. Up to four panes, each with tabs and drawn for its own width; a status line shows who you
+are, your office, the questions left and the server's version.
+
+| Key | Does |
+| --- | --- |
+| `ctrl+k` or `/` | the bar |
+| `ctrl+n`, `ctrl+x` | a new pane (up to four); close the pane |
+| `f6`, `shift+f6` | next, previous pane |
+| `[`, `]`, `ctrl+w` | previous, next tab; close the tab |
+| `<`, `>` | narrow, widen the pane |
+| `ctrl+s` | save this layout (`:save NAME`, `:load NAME`, `:layouts`) |
+| `?` | help; `ctrl+q` leaves |
+
+GRF is a map you can walk: arrows move, Enter re-centres on a record (one more lookup), Backspace goes back, `d` shows
+the record's brief beside it, `o` opens it in a tab. On PORT, Enter opens a disclosure's scores. Layouts are kept in
+`~/.config/phaneris/layouts.json` (only you can read it); "default" opens by itself. After 30 minutes without a key the
+screen locks until a key is pressed; your password is never asked for or kept.
 
 ### Themes
 
