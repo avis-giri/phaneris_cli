@@ -48,13 +48,14 @@ def visible_len(text):
 
 
 class Style:
-    def __init__(self, color=None, stream=None, theme=None):
+    def __init__(self, color=None, stream=None, theme=None, width=None, truecolor=None):
         self.stream = stream or sys.stdout
         self.tty = bool(getattr(self.stream, "isatty", lambda: False)())
         if color is None:
             color = self.tty and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
         self.color = bool(color)
-        self.truecolor = os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit")
+        self.truecolor = os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit") if truecolor is None else truecolor
+        self.fixed_width = width  # a pane in full-screen mode draws to its own width, not the terminal's
         name = (theme or os.environ.get("PHANERIS_THEME") or "phaneris").lower()
         self.theme = name if name in THEMES else "phaneris"
         self.p = THEMES[self.theme]
@@ -109,6 +110,8 @@ class Style:
 
     @property
     def width(self):
+        if self.fixed_width:
+            return max(30, self.fixed_width)
         return max(40, min(shutil.get_terminal_size((100, 24)).columns, 160))
 
     def line(self, text=""):

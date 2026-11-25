@@ -22,6 +22,8 @@ CODES = {
     "WHY": ("What moves the score: the fitted model's terms, and the facts not found", ("disclosure",)),
     "CMP": ("Comparables: the closest earlier records and how far they got, and look-alike patents", ("disclosure",)),
     "GRF": ("The neighbourhood in Phaneron, one and two links out", ("disclosure", "record")),
+    "OWN": ("Ownership and timeline: filings, grant, assignments, licences, trials, papers; later items as hindsight", ("disclosure", "record")),
+    "CLS": ("Patent class trends: filings by year, share in force, owners", ("disclosure", "record", "class")),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
@@ -34,9 +36,10 @@ STAGE_LABEL = {"out": "Going out", "licensed": "Licensed", "spinout": "Spin-out"
 class Ctx:
     """What one run of commands shares: the signed-in API, output, options, and what was looked at (in memory only)."""
 
-    def __init__(self, api, out, args):
+    def __init__(self, api, out, args, sink=None, style=None):
         self.api, self.out, self.args = api, out, args
-        self.s = out.s
+        self.s = style or out.s
+        self.sink = sink  # full-screen mode collects a screen's lines instead of printing them
         self._console = None
         self.recent = []
         cfg = __import__("phaneris_cli.store", fromlist=["read_config"]).read_config()
@@ -54,9 +57,15 @@ class Ctx:
             plain = re.sub(r"\033\[[0-9;?]*[A-Za-z]", "", text)
             indent = " " * (len(plain) - len(plain.lstrip(" ")))
             for part in textwrap.wrap(plain.strip(), width=self.s.width, initial_indent=indent, subsequent_indent=indent + "  ") or [""]:
-                print(self.s.line(part))
+                self._emit(self.s.line(part))
             return
-        print(self.s.line(text))
+        self._emit(self.s.line(text))
+
+    def _emit(self, line):
+        if self.sink is not None:
+            self.sink.append(line)
+        else:
+            print(line)
 
 
 # ------------------------------------------------------------------ grammar and subjects
@@ -195,10 +204,13 @@ def run(ctx, tokens):
         ctx.context = opts["disclosure"]
     if code in ("PORT",) and subject_text:
         fail(f"{code} is for your whole office; leave out the subject.", f"phaneris {code}")
-    subject = resolve(ctx, subject_text) if code != "PORT" else {"kind": "none"}
+    if code == "CLS" and CPC_RX.match(subject_text or ""):
+        subject = {"kind": "class", "code": subject_text.upper(), "name": subject_text.upper()}
+    else:
+        subject = resolve(ctx, subject_text) if code != "PORT" else {"kind": "none"}
     allowed = CODES[code][1]
     if subject["kind"] not in allowed:
-        what = {"disclosure": "a disclosure", "record": "a knowledge graph record", "none": "no subject"}[subject["kind"]]
+        what = {"disclosure": "a disclosure", "record": "a knowledge graph record", "class": "a patent class", "none": "no subject"}[subject["kind"]]
         fail(f"{code} does not apply to {what}.", f"See what does: phaneris {subject_text + ' ' if subject_text else ''}HELP")
     SCREENS[code](ctx, subject)
 
@@ -222,10 +234,10 @@ def screen_help(ctx, subject):
     kind = subject["kind"]
     if ctx.out.as_json:
         return ctx.out.data({"subject": subject.get("id") or subject.get("node"), "codes": {c: d for c, (d, k) in CODES.items() if kind in k}})
-    title = {"disclosure": f"Functions for {subject.get('name')}", "record": f"Functions for {subject.get('name')}", "none": "Functions"}[kind]
+    title = "Functions" if kind == "none" else f"Functions for {subject.get('name')}"
     ctx.p(s.bold(title))
     ctx.p(s.rule())
-    applies = {"disclosure": "a disclosure", "record": "a record", "none": "no subject"}
+    applies = {"disclosure": "a disclosure", "record": "a record", "class": "a patent class", "none": "no subject"}
     for c, (d, kinds) in CODES.items():
         if kind in kinds or kind == "none":
             code = s.accent(c.ljust(5)) if s.color else c.ljust(5)
@@ -579,8 +591,140 @@ def screen_ask(ctx, subject):
     ask_loop(ctx.api, scope, about, args, ctx.out)
 
 
+KIND_COLOR = {
+    "patent": "accent",
+    "grant": "good",
+    "trial": "warn",
+    "paper": "text",
+    "licence": "good",
+    "assignment": "accent",
+    "fee": "dim",
+    "maintenance": "dim",
+}
+
+
+def _strip_marks(s, years, asof, lo, hi):
+    """One character per year (or per few years), taller for more records; the disclosure year in red."""
+    cell = max(1, -(-(hi - lo + 1) // max(10, s.width - 14)))
+    marks = []
+    for y in range(lo, hi + 1, cell):
+        n = sum(1 for v in years if y <= v < y + cell)
+        here = bool(asof) and y <= int(asof[:4]) < y + cell
+        if s.color:
+            ch = "│" if here and not n else ("█" if n > 2 else "▆" if n == 2 else "▃" if n == 1 else "·")
+        else:
+            ch = "|" if here and not n else (str(min(n, 9)) if n else ".")
+        marks.append(s.bad(ch) if here else s.accent(ch) if n else s.dim(ch))
+    return "".join(marks)
+
+
+def screen_own(ctx, subject):
+    from urllib.parse import quote
+
+    s = ctx.s
+    if subject["kind"] == "disclosure":
+        t = ctx.api.get(f"/disclosures/{quote(subject['id'], safe='')}/timeline")["timeline"]
+    else:
+        t = ctx.api.get("/graph/timeline?" + _context_query(ctx, node=subject["node"], _bounded=True))["timeline"]
+    if ctx.out.as_json:
+        return ctx.out.data(t)
+    asof = t.get("as_of")
+    heading(ctx, subject, "OWN", f"disclosure date {asof}" if asof else "")
+    items = t.get("items") or []
+    if not items:
+        ctx.p(s.dim("No dated records are held for it."))
+        return
+    years = [int(i["date"][:4]) for i in items]
+    bounds = years + ([int(asof[:4])] if asof else [])
+    lo, hi = min(bounds), max(bounds)
+    ctx.p(f"  {lo} {_strip_marks(s, years, asof, lo, hi)} {hi}")
+    if asof:
+        ctx.p(s.dim(f"  the red mark is the disclosure date's year; {t.get('hindsight', 0)} of {len(items)} records come after it"))
+    ctx.p()
+    line = "─" if s.color else "-"
+    rule = f"  {line * 4} disclosure date {asof} {line * max(4, s.width - 34)}"
+    rule_done = not asof
+    for i in items:
+        if not rule_done and i["date"] > asof:
+            ctx.p(s.bad(rule))
+            rule_done = True
+        kind = i["kind"][:11].ljust(11)
+        color = getattr(s, KIND_COLOR.get(i["kind"], "text"))
+        who = f" ({i['who']})" if i.get("who") and ":" not in i["who"] else ""
+        text = f"  {i['date'][:10]}  {color(kind)} {i['what']}{who}"
+        ctx.p(s.dim(f"  {i['date'][:10]}  {kind} {i['what']}{who}") + s.dim("  hindsight") if i["hindsight"] else text)
+    if not rule_done:
+        ctx.p(s.bad(rule))
+    ctx.p()
+    ctx.p(s.dim("Hindsight: recorded after the disclosure date, shown for context and never used in a score."))
+
+
+def screen_cls(ctx, subject):
+    from .main import fail
+
+    s = ctx.s
+    if subject["kind"] == "disclosure":
+        main = _summary(ctx, subject).get("main_class")
+        if not main:
+            fail("no main patent class is recorded for this disclosure.", "Try a class directly, for example: phaneris A61K CLS")
+        q = _context_query(ctx, code=main, _bounded=True)
+    elif subject["kind"] == "class":
+        q = _context_query(ctx, code=subject["code"], _bounded=True)
+    else:
+        rec = subject.get("data") or ctx.api.get("/graph/record?" + _context_query(ctx, node=subject["node"], _bounded=True))
+        r = rec.get("record") or {}
+        if r.get("type") == "cpc_class_pivot":
+            q = _context_query(ctx, node=subject["node"], _bounded=True)
+        else:
+            groups = (r.get("fields") or {}).get("cpc_groups") or []
+            groups = groups if isinstance(groups, list) else [groups]
+            if not groups:
+                fail("no patent class is recorded for this record.")
+            q = _context_query(ctx, code=groups[0], _bounded=True)
+    c = ctx.api.get("/graph/class?" + q)["class"]
+    if ctx.out.as_json:
+        return ctx.out.data(c)
+    heading(ctx, {"name": f"Class {c['code']}", "node": c["node"]}, "CLS", f"in {c['graph']}")
+    w = s.width
+
+    def num(v):
+        return "not recorded" if v is None else f"{v:,}" if isinstance(v, int) else str(v)
+
+    ctx.p(f"  {s.dim('Patents'.ljust(18))}{num(c.get('total_patents'))}   {s.dim('in force')} {num(c.get('in_force'))}")
+    if c.get("active_ratio") is not None:
+        ctx.p(f"  {s.dim('Share in force'.ljust(18))}{draw.score_bar(s, c['active_ratio'], max(10, min(30, w - 40)))} {pct(c['active_ratio'], 0)}")
+    ctx.p(f"  {s.dim('Distinct owners'.ljust(18))}{num(c.get('distinct_owners'))}")
+    ctx.p(f"  {s.dim('Filings in all'.ljust(18))}{num(c.get('total_filings'))}   {s.dim('licences recorded')} {num(c.get('licences'))}")
+    by_year = c.get("filings_by_year") or {}
+    ctx.p()
+    ctx.p(s.bold("Filings by year"))
+    if len(by_year) >= 3:
+        years, vals = list(by_year), list(by_year.values())
+        chart_w = max(12, min(60, w - 16))
+        for row in draw.braille_line(s, vals, chart_w, 4):
+            ctx.p("  " + row)
+        ctx.p(s.dim(f"  {years[0]}{' ' * max(1, chart_w - 8)}{years[-1]}   peak {max(vals):,}"))
+    elif by_year:
+        ctx.p("  " + "   ".join(f"{y}: {n:,}" for y, n in by_year.items()) + s.dim("   (too few years to draw)"))
+    else:
+        ctx.p(s.dim("  none recorded"))
+    owners = c.get("owners_by_year") or {}
+    if owners:
+        ctx.p(f"  {s.dim('Owners filing, by year')}  " + "   ".join(f"{y}: {n:,}" for y, n in list(owners.items())[-6:]))
+    if c.get("top_owners"):
+        ctx.p()
+        ctx.p(s.bold("Top owners"))
+        for line in s.table([[o["owner"], o["patents"]] for o in c["top_owners"]], ["Owner", "Patents"], shrink=0).splitlines():
+            ctx.p("  " + line)
+    ctx.p()
+    for line in s.wrap(c.get("note", "")).splitlines():
+        ctx.p(s.dim(line))
+
+
 SCREENS = {
     "DES": screen_des,
+    "OWN": screen_own,
+    "CLS": screen_cls,
     "SCR": screen_scr,
     "WHY": screen_why,
     "CMP": screen_cmp,

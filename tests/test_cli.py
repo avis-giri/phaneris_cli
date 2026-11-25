@@ -36,6 +36,7 @@ SUMMARY = {
     "patent": "123",
     "as_of": "2010-01-01",
     "scored": "in the data import",
+    "main_class": "A01B1/00",
     "deal_chance": {"real_data": 0.05, "range": [0.04, 0.06], "percentile": 59, "times_average": 0.96},
     "full_estimate": {"p_out": 0.07, "percentile": 67},
     "recommendation": "Review",
@@ -95,6 +96,31 @@ DRIVERS = {
     },
     "missing": [{"metric": "IP defensibility", "fact": "Family size", "reason": "Patent family source not connected"}],
     "missing_note": "Facts in the four modelled metrics change the deal chance through the fitted model.",
+}
+TIMELINE = {
+    "as_of": "2010-01-01",
+    "hindsight": 2,
+    "items": [
+        {"date": "2008-02-01", "kind": "trial", "what": "trial NCT1 starts", "who": "", "hindsight": False},
+        {"date": "2009-05-01", "kind": "patent", "what": "first application filed", "who": "", "hindsight": False},
+        {"date": "2012-03-01", "kind": "patent", "what": "granted", "who": "", "hindsight": True},
+        {"date": "2013-01-05", "kind": "licence", "what": "exclusive license", "who": "A LICENSEE", "hindsight": True},
+    ],
+}
+CLASS = {
+    "node": "cpc:A01B 1/00",
+    "code": "A01B 1/00",
+    "graph": "phaneron",
+    "total_patents": 100,
+    "in_force": 40,
+    "active_ratio": 0.4,
+    "distinct_owners": 12,
+    "total_filings": 1878,
+    "licences": 3,
+    "filings_by_year": {"2006": 4, "2007": 9, "2008": 12, "2009": 20},
+    "owners_by_year": {"2008": 5, "2009": 7},
+    "top_owners": [{"owner": "AN OWNER", "patents": 5}],
+    "note": "Yearly counts cover only the years the pipeline fetched for this class (2006, 2007, 2008, 2009).",
 }
 BOARD = {
     "office": "aldermoor",
@@ -170,6 +196,18 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {"drivers": Fake.drivers})
         if url.path == "/api/board":
             return self._send(200, BOARD)
+        if url.path == "/api/disclosures/T-1/timeline":
+            return self._send(200, {"timeline": {"id": "T-1", "name": "Test one", **TIMELINE}})
+        if url.path in ("/api/graph/timeline", "/api/graph/class"):
+            if "disclosure" not in q and Fake.role != "admin":
+                return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
+            if url.path == "/api/graph/class":
+                if q.get("code", "").replace(" ", "").upper() == "H01L9/99":
+                    return self._send(404, {"error": "That class is not within reach of this disclosure.", "code": "out_of_reach"})
+                return self._send(200, {"class": CLASS})
+            return self._send(
+                200, {"timeline": {"node": q["node"], "graph": "phaneron", "id": q["node"], "type": "patent", "name": "A patent", **TIMELINE}}
+            )
         if url.path == "/api/graph/map":
             if "disclosure" not in q and Fake.role != "admin":
                 return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
@@ -743,3 +781,41 @@ def test_ghost_text_only_on_a_color_terminal(monkeypatch):
 
     monkeypatch.setenv("TERM", "dumb")
     assert editor.available() is False
+
+
+def test_own_draws_the_timeline_with_the_disclosure_date(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "OWN")
+    assert out.index("first application filed") < out.index("---- disclosure date 2010-01-01") < out.index("granted")
+    assert "hindsight" in out and "A LICENSEE" in out and "2 of 4 records come after it" in out
+    assert "A patent" in run(capsys, "US 456789", "OWN")  # a patent's own timeline, within reach of T-1
+    assert json.loads(run(capsys, "--json", "T-1", "OWN"))["hindsight"] == 2
+
+
+def test_cls_for_a_class_a_disclosure_and_out_of_reach(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "CLS")  # the disclosure's main class
+    assert "Class A01B 1/00" in out and "Filings by year" in out and "AN OWNER" in out and "2006" in out and "peak 20" in out
+    assert [x for x in Fake.log if x[1] == "/api/graph/class"][-1][2]["code"] == "A01B1/00"
+    assert "Class A01B 1/00" in run(capsys, "A01B 1/00", "CLS")
+    assert "not within reach" in failed(capsys, "H01L 9/99", "CLS")
+
+
+@pytest.mark.parametrize("cols", [60, 120])
+def test_own_and_cls_fit_the_terminal(server, capsys, monkeypatch, cols):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    monkeypatch.setenv("COLUMNS", str(cols))
+    for words in (["T-1", "OWN"], ["T-1", "CLS"]):
+        out = run(capsys, *words)
+        assert max(len(line) for line in out.splitlines()) <= cols, (words, cols)
+
+
+def test_braille_chart_draws_dots_on_a_color_terminal():
+    from phaneris_cli import draw
+
+    rows = draw.braille_line(Style(color=True, stream=TTY()), [1, 5, 3, 9], 8, 3)
+    plain = [__import__("re").sub(r"\033\[[0-9;]*m", "", r) for r in rows]
+    assert len(plain) == 3 and all(len(r) == 8 for r in plain) and any(ch != "\u2800" for r in plain for ch in r)
+    assert all(0x2800 <= ord(ch) <= 0x28FF for r in plain for ch in r)
+    assert len(draw.braille_line(Style(color=False), [1, 2, 3], 10)) == 1  # plain: one ASCII row

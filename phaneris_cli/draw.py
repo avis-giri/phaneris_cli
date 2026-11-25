@@ -109,3 +109,38 @@ def heat(s, score, kind):
         return "0123456789"[min(9, int(score * 10))]
     ch = " ░▒▓█"[level] if kind == "real" else "·░▒▒▒"[level]
     return (s.good if kind == "real" else s.warn)(ch if ch != " " else "▁")
+
+
+# Braille cells: each character is a 2 by 4 grid of dots, so a line chart gets twice the columns and four times the
+# rows of plain blocks. Dot bits, by (column, row) inside a cell:
+_BRAILLE = {(0, 0): 0x01, (0, 1): 0x02, (0, 2): 0x04, (0, 3): 0x40, (1, 0): 0x08, (1, 1): 0x10, (1, 2): 0x20, (1, 3): 0x80}
+
+
+def braille_line(s, values, width, height=4):
+    """Values as a line chart `width` characters wide and `height` rows tall, in braille dots (on a terminal with
+    color) or a plain ASCII sparkline. Returns the rows top first."""
+    if not values:
+        return []
+    width, height = max(4, width), max(1, height)
+    if not s.color:
+        return [sparkline(s, values, width)]
+    cols, rows = width * 2, height * 4
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1
+    n = len(values)
+    xs = [round(i * (cols - 1) / max(n - 1, 1)) for i in range(n)]
+    ys = [rows - 1 - round((v - lo) / span * (rows - 1)) for v in values]
+    grid = [[0] * width for _ in range(height)]
+
+    def dot(x, y):
+        grid[y // 4][x // 2] |= _BRAILLE[(x % 2, y % 4)]
+
+    for i in range(n):
+        dot(xs[i], ys[i])
+        if i:  # join to the previous point, one dot per column
+            x0, y0, x1, y1 = xs[i - 1], ys[i - 1], xs[i], ys[i]
+            for x in range(x0 + 1, x1 + 1):
+                y = round(y0 + (y1 - y0) * (x - x0) / max(x1 - x0, 1))
+                for yy in range(min(y, y0 if x == x0 + 1 else y), max(y, y0 if x == x0 + 1 else y) + 1):
+                    dot(x, yy)
+    return [s.accent("".join(chr(0x2800 + c) for c in row)) for row in grid]
