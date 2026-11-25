@@ -32,6 +32,7 @@ Account
   whoami [--banner]     who you are signed in as
   version               this program's version and the server's
   history [--clear]     what you ran in the command bar, used for Tab suggestions
+  tui [SUBJECT CODE]    full-screen mode: panes, tabs, a walkable map (needs the optional extra)
   doctor                check Python, the server, your sign-in and where it is kept
 
 Disclosures and reports
@@ -59,6 +60,7 @@ Functions: phaneris <SUBJECT> <CODE>, or phaneris go "<SUBJECT> <CODE>"
   DES   what it is              SCR   scores, deal stages, Real or Inferred
   WHY   what moves the score    CMP   comparables and how far they got
   GRF   neighbourhood map       ASK   a conversation about it
+  OWN   ownership and timeline  CLS   patent class trends
   PORT  my office's board       HELP  what applies to a subject
   Examples: phaneris T-000003 SCR    phaneris "Carl H. June" GRF    phaneris PORT
 
@@ -861,6 +863,7 @@ SUBCOMMANDS = (
     "version",
     "doctor",
     "history",
+    "tui",
     "disclosures",
     "report",
     "score",
@@ -885,6 +888,32 @@ def global_options(argv):
     return known, rest
 
 
+TUI_HINT = 'pipx inject phaneris-cli textual   (or: pipx install "phaneris-cli[tui] @ git+https://github.com/avis-giri/phaneris_cli")'
+
+
+def tui_available():
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def open_tui(args, out, start):
+    """Full-screen mode, when the optional extra (Textual) is installed."""
+    if not tui_available():
+        Fail_and_exit(out, Fail("full-screen mode needs the optional extra.", TUI_HINT))
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        Fail_and_exit(out, Fail("full-screen mode needs a terminal.", "Run it in a terminal, or use the commands directly (phaneris T-000003 SCR)."))
+    try:
+        api = signed_in(args)
+    except Fail as f:
+        Fail_and_exit(out, f)
+    from . import tui
+
+    tui.run(api, args, start)
+
+
 def run_functions(argv):
     """`phaneris <SUBJECT> <CODE>`, `phaneris go "<SUBJECT> <CODE>"`, or the command bar with no words."""
     import shlex
@@ -895,8 +924,12 @@ def run_functions(argv):
     out = Out(args)
     if words and words[0] == "go":
         words = shlex.split(" ".join(words[1:]))
+    if words and words[0] == "tui":
+        return open_tui(args, out, " ".join(words[1:]) or None)
     if not words:
         if sys.stdin.isatty() and sys.stdout.isatty() and not args.json:
+            if tui_available():
+                return open_tui(args, out, None)
             try:
                 ctx = term.Ctx(signed_in(args), out, args)
             except Fail as f:

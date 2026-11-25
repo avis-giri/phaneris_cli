@@ -9,6 +9,10 @@ description = "Use Phaneris from a terminal: your disclosures, reports, scoring 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+
+[project.optional-dependencies]
+# full-screen mode (phaneris tui); the plain command line needs nothing else
+tui = ["textual>=8.0"]
 license = { text = "Proprietary" }
 
 [project.scripts]

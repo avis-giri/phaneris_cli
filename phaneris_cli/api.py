@@ -54,3 +54,23 @@ class Api:
 
     def post(self, path, body=None):
         return self.call("POST", path, body if body is not None else {})
+
+
+class CachedApi:
+    """The same API, remembering what it read: a full-screen pane re-drawn at a new width reads nothing again (so it
+    spends no more lookups). Writes are never cached."""
+
+    def __init__(self, api):
+        self.api, self.server, self.token, self._seen = api, api.server, api.token, {}
+
+    def get(self, path, **kw):
+        key = (path, tuple(sorted(kw.items())))
+        if key not in self._seen:
+            self._seen[key] = self.api.get(path, **kw)
+        return self._seen[key]
+
+    def post(self, path, body=None):
+        return self.api.post(path, body)
+
+    def call(self, *a, **kw):
+        return self.api.call(*a, **kw)

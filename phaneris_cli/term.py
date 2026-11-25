@@ -180,7 +180,7 @@ def _pick(ctx, hits, text):
     from .main import fail
 
     hits = hits[:12]
-    if ctx.out.as_json or not sys.stdin.isatty():
+    if ctx.out.as_json or not sys.stdin.isatty() or not getattr(ctx, "interactive", True):
         names = "; ".join(f"{h['id']} ({h.get('name') or ''})" for h in hits[:6])
         fail(f'"{text}" matches {len(hits)} records: {names}.', "Use the record id, for example: phaneris inventor:123 DES")
     ctx.p(ctx.s.bold(f'"{text}" matches {len(hits)} records:'))

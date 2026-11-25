@@ -143,7 +143,10 @@ MAP = {
     "groups": {
         "people": {
             "one": [{"id": "inv:c", "type": "inventor", "name": "Cy Third", "relation": "co_inventor"}],
-            "two": [{"id": "inv:b", "type": "inventor", "name": "Bo Second", "via": "pat:2", "relation": "invented_by"}],
+            "two": [
+                {"id": "inv:b", "type": "inventor", "name": "Bo Second", "via": "pat:2", "relation": "invented_by"},
+                {"id": "far:1", "type": "inventor", "name": "Far Away", "via": "pat:2", "relation": "invented_by"},
+            ],
         },
         "disclosures": {"one": [{"id": "T-1", "type": "asset", "name": "Test one", "relation": "protected_by"}], "two": []},
     },
@@ -211,7 +214,9 @@ class Fake(BaseHTTPRequestHandler):
         if url.path == "/api/graph/map":
             if "disclosure" not in q and Fake.role != "admin":
                 return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
-            return self._send(200, MAP)
+            if q.get("node") == "far:1":
+                return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
+            return self._send(200, {**MAP, "center": {**MAP["center"], "id": q.get("node", "inv:a")}})
         if url.path == "/api/explore/usage":
             return self._send(
                 200, {"quota": Fake.quota, "graph_quota": {**Fake.quota, "kind": "graph", "limit": 5, "window_hours": None}, "pack_requested": False}
