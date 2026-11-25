@@ -951,7 +951,7 @@ def run_functions(argv):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     _, words = global_options(argv)
-    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] == "go":
+    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui"):
         return run_functions(argv)
     args = build_parser().parse_args(argv)
     out = Out(args)

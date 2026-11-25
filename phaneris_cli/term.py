@@ -664,10 +664,11 @@ def screen_cls(ctx, subject):
 
     s = ctx.s
     if subject["kind"] == "disclosure":
-        main = _summary(ctx, subject).get("main_class")
-        if not main:
-            fail("no main patent class is recorded for this disclosure.", "Try a class directly, for example: phaneris A61K CLS")
-        q = _context_query(ctx, code=main, _bounded=True)
+        # the class the disclosure is grouped under in the graph (the server says when it differs from the report's)
+        ctx.context = subject["id"]
+        q = _context_query(ctx, _bounded=True) or f"disclosure={subject['id']}"
+        if "disclosure=" not in q:
+            q += f"&disclosure={subject['id']}"
     elif subject["kind"] == "class":
         q = _context_query(ctx, code=subject["code"], _bounded=True)
     else:
@@ -698,14 +699,17 @@ def screen_cls(ctx, subject):
     by_year = c.get("filings_by_year") or {}
     ctx.p()
     ctx.p(s.bold("Filings by year"))
-    if len(by_year) >= 3:
-        years, vals = list(by_year), list(by_year.values())
+    years = list(by_year)
+    consecutive = all(int(b) - int(a) == 1 for a, b in zip(years, years[1:], strict=False))
+    if len(by_year) >= 3 and consecutive:  # a line only across years that were all fetched; a gap is unknown, not zero
+        vals = list(by_year.values())
         chart_w = max(12, min(60, w - 16))
         for row in draw.braille_line(s, vals, chart_w, 4):
             ctx.p("  " + row)
         ctx.p(s.dim(f"  {years[0]}{' ' * max(1, chart_w - 8)}{years[-1]}   peak {max(vals):,}"))
     elif by_year:
-        ctx.p("  " + "   ".join(f"{y}: {n:,}" for y, n in by_year.items()) + s.dim("   (too few years to draw)"))
+        why = "too few years to draw" if len(by_year) < 3 else "years missing in between, so no line is drawn"
+        ctx.p("  " + "   ".join(f"{y}: {n:,}" for y, n in by_year.items()) + s.dim(f"   ({why})"))
     else:
         ctx.p(s.dim("  none recorded"))
     owners = c.get("owners_by_year") or {}
@@ -715,10 +719,13 @@ def screen_cls(ctx, subject):
         ctx.p()
         ctx.p(s.bold("Top owners"))
         for line in s.table([[o["owner"], o["patents"]] for o in c["top_owners"]], ["Owner", "Patents"], shrink=0).splitlines():
-            ctx.p("  " + line)
+            ctx.p(line)
     ctx.p()
     for line in s.wrap(c.get("note", "")).splitlines():
         ctx.p(s.dim(line))
+    if c.get("chosen"):
+        for line in s.wrap(c["chosen"]).splitlines():
+            ctx.p(s.dim(line))
 
 
 SCREENS = {

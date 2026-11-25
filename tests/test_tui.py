@@ -151,15 +151,19 @@ def test_timeline_and_class_draw_for_the_pane_width(server, capsys, monkeypatch,
 
 
 def test_idle_lock_covers_the_screen_until_a_key(server, capsys, monkeypatch):  # noqa: F811
-    app = make_app(server, capsys, monkeypatch, start="T-1 SCR", idle=0.2)
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR", idle=3600)
 
     async def go():
         async with app.run_test(size=(120, 40)) as pilot:
             await settle(pilot, app)
-            time.sleep(0.3)
             app.check_idle_lock()
-            await settle(pilot, app)
-            assert isinstance(app.screen, tui.LockScreen)
+            assert not app.is_locked  # just used: no lock
+            app.idle_seconds = 60
+            app.last_activity = time.monotonic() - 61  # longer ago than the idle time
+            app.check_idle_lock()
+            for _ in range(5):
+                await pilot.pause()
+            assert app.is_locked and any(isinstance(s, tui.LockScreen) for s in app.screen_stack)
             await pilot.press("x")
             await settle(pilot, app)
             assert not isinstance(app.screen, tui.LockScreen)

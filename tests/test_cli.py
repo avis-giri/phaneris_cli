@@ -801,7 +801,8 @@ def test_cls_for_a_class_a_disclosure_and_out_of_reach(server, capsys, monkeypat
     signed(server, capsys, monkeypatch)
     out = run(capsys, "T-1", "CLS")  # the disclosure's main class
     assert "Class A01B 1/00" in out and "Filings by year" in out and "AN OWNER" in out and "2006" in out and "peak 20" in out
-    assert [x for x in Fake.log if x[1] == "/api/graph/class"][-1][2]["code"] == "A01B1/00"
+    last = [x for x in Fake.log if x[1] == "/api/graph/class"][-1][2]
+    assert last["disclosure"] == "T-1" and "code" not in last  # the class it is linked to in the graph
     assert "Class A01B 1/00" in run(capsys, "A01B 1/00", "CLS")
     assert "not within reach" in failed(capsys, "H01L 9/99", "CLS")
 
@@ -824,3 +825,20 @@ def test_braille_chart_draws_dots_on_a_color_terminal():
     assert len(plain) == 3 and all(len(r) == 8 for r in plain) and any(ch != "\u2800" for r in plain for ch in r)
     assert all(0x2800 <= ord(ch) <= 0x28FF for r in plain for ch in r)
     assert len(draw.braille_line(Style(color=False), [1, 2, 3], 10)) == 1  # plain: one ASCII row
+
+
+def test_tui_without_the_extra_or_a_terminal_says_what_to_do(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setattr(cli, "tui_available", lambda: False)
+    err = failed(capsys, "tui")
+    assert "optional extra" in err and "pipx inject phaneris-cli textual" in err
+    monkeypatch.setattr(cli, "tui_available", lambda: True)
+    assert "needs a terminal" in failed(capsys, "tui")
+
+
+def test_cls_draws_no_line_across_missing_years(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setitem(CLASS, "filings_by_year", {"2011": 98, "2022": 1, "2023": 1})
+    run(capsys, "T-1", "DES")
+    out = run(capsys, "A01B 1/00", "CLS")
+    assert "2011: 98   2022: 1   2023: 1" in out and "years missing in between" in out and "peak" not in out
