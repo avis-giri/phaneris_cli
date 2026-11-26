@@ -72,7 +72,7 @@ def test_the_command_bar_locks_after_the_limit(server, capsys, monkeypatch):  # 
     ctx = term.Ctx(api, cli.Out(args), args)
     term.command_bar(ctx)
     out = capsys.readouterr().out
-    assert "Signed out after 1 minutes without use" in out
+    assert "Signed out after 1 minute without use" in out
     assert ("POST", "/api/cli/logout", {"why": "idle"}) in Fake.log
     assert store.load_token(url) is None
     assert not os.path.exists(store.TOKEN_FILE) or url not in open(store.TOKEN_FILE).read()

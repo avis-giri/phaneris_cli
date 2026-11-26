@@ -562,7 +562,8 @@ class LockScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         minutes = round(self.app.idle_seconds / 60)
-        yield Static(f"[b]phaneris.[/b]  Signed out after {minutes} minutes without use.\n\nPress any key to leave, then run: phaneris login")
+        unit = "minute" if minutes == 1 else "minutes"
+        yield Static(f"[b]phaneris.[/b]  Signed out after {minutes} {unit} without use.\n\nPress any key to leave, then run: phaneris login")
 
     def on_key(self, event):
         event.stop()

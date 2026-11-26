@@ -53,4 +53,4 @@ def lock_out(api, mins, color=True):
     store.delete_token(api.server)
     if sys.stdout.isatty():
         sys.stdout.write("\x1b[2J\x1b[H")
-    print(f"Signed out after {mins} minutes without use. Run phaneris login to carry on.")
+    print(f"Signed out after {mins} minute{'' if mins == 1 else 's'} without use. Run phaneris login to carry on.")
