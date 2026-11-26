@@ -121,7 +121,7 @@ What you run in the bar is kept in ~/.config/phaneris/history (only you can read
         """
 A subject is a disclosure id, short name or patent number (T-000003, "Cancer T-cell therapy", US 8916381), a patent number of any patent within reach, a "person or owner" in quotes, a patent class (A61K, A61K 39/39) or a record id from another screen (inventor:123, pat:8916381). Codes are case-insensitive.
 
-Records are looked up around the disclosure you opened last; administrators can reach the whole graph. Open one first with phaneris T-ID DES, or add --disclosure ID.
+Records are looked up around the disclosure you opened last; administrators read every graph, even when they name a disclosure. Open one first with phaneris T-ID DES, or add --disclosure ID.
 
 A name that matches several records gives a numbered list to choose from. A name that matches nothing gives the closest matches ("did you mean"): on a terminal, type a number to run the same code on it (Enter cancels); in a script, they are listed and the command exits with an error. A mistyped code (SRC) suggests the right one (SCR).
 
@@ -190,7 +190,7 @@ There are two kinds of question. The service decides every limit; the command li
 
 A question the answer service could not answer does not count. phaneris usage shows what you have left. phaneris buy records a request for 100 more; until online payment opens, an administrator adds them and marks the request filled. Bought questions do not expire.
 
-Lookups (graph commands, DES, GRF, OWN, CLS on records, did-you-mean, adding a watch) reach only what your disclosure connects to: the disclosure, its patents and the records within two links of them, never another institution's disclosures. Administrators may leave the disclosure out and reach the whole graph. Lookups are limited to 300 an hour per person, to keep the graph from being copied in bulk.
+Lookups (graph commands, DES, GRF, OWN, CLS on records, did-you-mean, adding a watch) reach only what your disclosure connects to: the disclosure, its patents and the records within two links of them, never another institution's disclosures. Office users and developers stay inside the named disclosure's neighbourhood. Administrators read every graph, whole, even when they name a disclosure, and may leave the disclosure out. Lookups are limited to 300 an hour per person, to keep the graph from being copied in bulk.
 """,
     ),
     (

@@ -97,3 +97,9 @@ def test_question_mark_topics_in_the_command_bar(server, capsys, monkeypatch):  
     term.command_bar(ctx)
     out = capsys.readouterr().out
     assert "Watchlists and the feed" in out and "Guide topics: ? start" in out and out.count("The Phaneris guide (version") == 2
+
+
+def test_who_reaches_what():
+    body = text()
+    assert "Office users and developers stay inside the named disclosure's neighbourhood" in body
+    assert "Administrators read every graph, whole, even when they name a disclosure" in body
