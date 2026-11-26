@@ -53,6 +53,7 @@ anyone's on Users.
 | `phaneris history [--clear]` | What you ran in the command bar (used for Tab suggestions); `--clear` empties it |
 | `phaneris tui [SUBJECT CODE]` | Full-screen mode (needs the optional extra) |
 | `phaneris doctor` | Check Python, the server, your sign-in and where it is kept |
+| `phaneris guide [TOPIC]` / `help TOPIC` | The full guide, offline and versioned with this program; `--search WORD` finds a word |
 | `phaneris disclosures` | Your office's disclosures with deal chance and recommendation |
 | `phaneris disclosures show ID [--all]` | One disclosure's report: outlook, checks, every metric with Real or Inferred, facts not measured |
 | `phaneris report ID [--pdf FILE] [--all]` | The same report; `--pdf` saves the designed report PDF |
@@ -101,7 +102,11 @@ phaneris go "T-000003 WHY"     # the same, as one line
 | PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
 | HELP | What applies to the subject | anything |
 
-Codes are case-insensitive. A name that matches several records gives a numbered list to choose from. Records are
+Codes are case-insensitive. A name that matches several records gives a numbered list to choose from. A name that
+matches nothing gives the closest matches the server finds among what you may see ("No exact match for 'Carl Jun'.
+Did you mean: 1. Carl H. June (person) ..."): on a terminal, type a number to run the same code on it (Enter cancels);
+with `--json` or in a script they are listed and the command exits non-zero. A mistyped code (`SRC`) suggests the
+right one (`SCR`). Each such check counts as one lookup. Records are
 looked up around the disclosure you opened last (administrators can reach the whole graph); open one first with
 `phaneris T-ID DES`.
 
@@ -126,6 +131,15 @@ phaneris feed
 You can watch your own disclosures, and records within reach of one of them, up to 200 items. The feed is checked
 against what you may see each time it is read: a change about a record that has left your reach is not named, and a
 watched record that has left your reach stops showing. SCR shows a one-line score history; HIST shows every kept version.
+
+### The guide
+
+`phaneris guide` lists the topics; `phaneris guide TOPIC` (or `phaneris help TOPIC`) opens one: getting started, every
+command, signing in and security, the command bar, subjects and codes, reading each screen, questions and limits,
+watchlists and the feed, full-screen keys, output for scripts, troubleshooting, and what is kept on disk. It ships with
+this version, so it works offline and matches the commands you have. On a terminal it pages (your `PAGER`, or a
+simple built-in pager); piped, it prints plainly. `phaneris guide --search WORD` finds a word. In the command bar,
+`? TOPIC`; in full-screen mode, `? TOPIC` or `:guide TOPIC` opens it in a tab.
 
 ### The command bar
 

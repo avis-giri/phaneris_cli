@@ -281,3 +281,22 @@ def test_w_watches_the_pane_subject(server, capsys, monkeypatch):  # noqa: F811
             assert notes[-2:] == ["Watching Test one.", "Stopped watching Test one."]
 
     run(go())
+
+
+def test_guide_pane_from_the_bar(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 DES")
+
+    async def go():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "? watch")
+            await settle(pilot, app)
+            view = app.query_one(tui.GuideView)
+            assert "Watchlists and the feed" in str(view.query_one(".body").render())
+            await type_line(pilot, ":guide")
+            await settle(pilot, app)
+            assert len(app.query(tui.GuideView)) == 2
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert "Guide watch" in titles and "Guide" in titles
+
+    run(go())

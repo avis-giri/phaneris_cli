@@ -7,6 +7,7 @@ program shows what it answers.
 import argparse
 import getpass
 import json
+import shutil
 import os
 import platform
 import re
@@ -33,6 +34,7 @@ Account
   version               this program's version and the server's
   history [--clear]     what you ran in the command bar, used for Tab suggestions
   tui [SUBJECT CODE]    full-screen mode: panes, tabs, a walkable map (needs the optional extra)
+  guide [TOPIC]         the full guide in the terminal (help TOPIC too; --search WORD)
   doctor                check Python, the server, your sign-in and where it is kept
 
 Disclosures and reports
@@ -885,6 +887,7 @@ SUBCOMMANDS = (
     "graph",
     "watch",
     "feed",
+    "guide",
     "go",
 )
 
@@ -925,6 +928,41 @@ def open_tui(args, out, start):
     from . import tui
 
     tui.run(api, args, start)
+
+
+def show_guide(argv):
+    """`phaneris guide [TOPIC] [--search WORD]` and `phaneris help TOPIC`: the guide shipped with this version."""
+    from . import guide
+
+    args, words = global_options(argv)
+    out = Out(args)
+    words = words[1:]
+    word = None
+    if "--search" in words:
+        i = words.index("--search")
+        word = " ".join(words[i + 1 :]).strip()
+        words = words[:i]
+        if not word:
+            Fail_and_exit(out, Fail("give a word to find.", "phaneris guide --search watch"))
+    width = min(100, shutil.get_terminal_size((100, 24)).columns - 1)
+    if word:
+        lines, n = guide.search(word, width)
+        if args.json:
+            return print(json.dumps({"search": word, "lines": lines, "matches": n}))
+        if not n:
+            Fail_and_exit(out, Fail(f'"{word}" is not in the guide.', "See the topics: phaneris guide"))
+        return guide.page([f'"{word}": {n} place{"s" if n != 1 else ""} in the guide', ""] + lines)
+    topic = " ".join(words).strip()
+    if not topic:
+        if args.json:
+            return print(json.dumps(guide.as_data()))
+        return guide.page(guide.contents(width))
+    slug = guide.find(topic)
+    if not slug:
+        Fail_and_exit(out, Fail(f'no topic "{topic}" in the guide.', "See the topics: phaneris guide, or find a word: phaneris guide --search WORD"))
+    if args.json:
+        return print(json.dumps(next(x for x in guide.as_data()["topics"] if x["id"] == slug)))
+    guide.page(guide.render(slug, width) + [f"Topics: phaneris guide. On the website: {guide.DOCS}"])
 
 
 def watch_words(words):
@@ -983,6 +1021,8 @@ def run_functions(argv):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     _, words = global_options(argv)
+    if words and (words[0] == "guide" or (words[0] == "help" and len(words) > 1)):
+        return show_guide(argv)
     if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui", "watch", "feed"):
         return run_functions(argv)
     args = build_parser().parse_args(argv)

@@ -337,6 +337,7 @@ def screen_help(ctx, subject):
     if kind == "none":
         ctx.p(s.dim('Give a subject first:  phaneris T-000003 SCR   phaneris "Carl H. June" GRF   phaneris US 8916381 DES   phaneris PORT'))
         ctx.p(s.dim('Or: phaneris go "T-000003 WHY". With no words on a terminal, phaneris opens the command bar.'))
+        ctx.p(s.dim("The full guide, with what every screen shows: phaneris guide"))
     else:
         ident = subject.get("id") or subject.get("node")
         ctx.p(s.dim(f"For example: phaneris {ident} {'SCR' if kind == 'disclosure' else 'GRF'}"))
@@ -1136,6 +1137,16 @@ def command_bar(ctx):
             continue
         if line in ("?", "help", "HELP"):
             screen_help(ctx, {"kind": "none"})
+            ctx.p(ctx.s.dim("Guide topics: ? start, ? subjects, ? screens, ? watch, ? signin ... (all: ? guide)"))
+            continue
+        if line.startswith("?") or line.lower() == "guide" or line.lower().startswith("guide "):
+            from . import guide
+
+            name = line.lstrip("?").strip()
+            name = name[5:].strip() if name.lower().startswith("guide") else name
+            slug = guide.find(name) if name else None
+            for row in guide.render(slug, ctx.s.width - 1) if slug else guide.contents(ctx.s.width - 1):
+                ctx.p(row)
             continue
         if line.lower() in ("quit", "exit"):
             return

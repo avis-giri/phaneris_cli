@@ -141,6 +141,35 @@ class ScreenView(VerticalScroll):
             self.app.call_from_thread(self.app.notify, f.message, severity="warning")
 
 
+class GuideView(VerticalScroll):
+    """A topic of the guide shipped with this version (phaneris guide), or its list of topics. Reads nothing."""
+
+    DEFAULT_CSS = "GuideView { padding: 0 1; }"
+
+    def __init__(self, topic, **kw):
+        super().__init__(**kw)
+        self.topic = topic
+
+    def compose(self) -> ComposeResult:
+        yield Static("", classes="body")
+
+    def on_mount(self):
+        self.call_after_refresh(self.redraw)
+
+    def on_resize(self, event):
+        self.call_after_refresh(self.redraw)
+
+    def redraw(self):
+        from . import guide
+
+        width = max(30, self.size.width - 3)
+        slug = guide.find(self.topic) if self.topic else None
+        lines = guide.render(slug, width) if slug else guide.contents(width)
+        if self.topic and not slug:
+            lines = [f'No topic "{self.topic}". The topics:', ""] + lines
+        self.query_one(".body", Static).update(Text("\n".join(lines)))
+
+
 class NewsView(Vertical):
     """NEWS as a table, newest first: Enter on a line opens its screen (a score move its history, a change its timeline)
     in a new tab. Showing it marks the feed as seen, as `phaneris feed` does."""
@@ -473,7 +502,8 @@ HELP_TEXT = """\
 [b]The bar[/b]   type a subject and a code, then Enter: it opens in the pane in focus, in a new tab.
   T-000003 SCR   "Carl H. June" GRF   US 8916381 OWN   A61K CLS   PORT
   Tab suggests from your own earlier commands; the best one shows dimmed, Right arrow takes it.
-  :save NAME   :load NAME   :layouts   :theme amber|phaneris   :quit
+  :save NAME   :load NAME   :layouts   :theme amber|phaneris   :guide TOPIC   :quit
+  ? TOPIC opens a topic of the guide in a tab (? guide: the list)
 
 [b]Keys[/b]
   ctrl+k or /       the bar                 ctrl+n          a new pane (up to four)
@@ -683,6 +713,10 @@ class PhanerisApp(App):
             return
         if line in ("?", "help", "HELP"):
             return self.action_help()
+        if line.startswith("?"):  # ? TOPIC: that topic of the guide
+            return self.open_tab(":guide " + line[1:].strip())
+        if line.startswith(":guide"):
+            return self.open_tab(line)
         if line.startswith(":"):
             return self.colon(line[1:].split())
         history.add(line)
@@ -704,18 +738,23 @@ class PhanerisApp(App):
         elif cmd in ("quit", "q"):
             self.exit()
         else:
-            self.notify("Unknown. Try :save NAME, :load NAME, :layouts, :theme amber, :quit", severity="warning")
+            self.notify("Unknown. Try :save NAME, :load NAME, :layouts, :theme amber, :guide TOPIC, :quit", severity="warning")
 
     # ---------------------------------------------------------------- panes and tabs
 
     def open_tab(self, line, pane=None):
-        """Open one screen in a new tab of the pane in focus (or the pane given)."""
+        """Open one screen in a new tab of the pane in focus (or the pane given). ":guide TOPIC" opens the guide."""
+        if line.startswith(":guide"):
+            topic = line[len(":guide") :].strip()
+            return self._add_tab(line, f"Guide {topic}".strip(), GuideView(topic), pane)
         subject, code, _ = term.parse(shlex.split(line))
         views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, **({"NEWS": NewsView} if not subject else {})}
         widget = views.get(code, ScreenView)(line)
+        return self._add_tab(line, f"{subject} {code}".strip() if subject else code, widget, pane)
+
+    def _add_tab(self, line, title, widget, pane=None):
         self._tab_n += 1
         tab_id = f"tab{self._tab_n}"
-        title = f"{subject} {code}".strip() if subject else code
         target = pane if pane is not None else self.pane()
         self.tab_lines[tab_id] = line
         target.tabs.add_pane(TabPane(title[:28], widget, id=tab_id))

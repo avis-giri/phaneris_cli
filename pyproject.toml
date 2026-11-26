@@ -27,3 +27,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"phaneris_cli/guide.py" = ["E501"]  # the guide's paragraphs are one line each and wrapped to the terminal when shown
