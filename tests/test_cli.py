@@ -183,6 +183,7 @@ class Fake(BaseHTTPRequestHandler):
     log = []
     background = []
     graph_left = 4
+    explore_fail = None
     approved = False
     role = "client"
     two_step = False  # the account has two-step sign-in on: password sign-in needs code 123456
@@ -343,6 +344,8 @@ class Fake(BaseHTTPRequestHandler):
         if not self._authed():
             return
         if self.path == "/api/explore":
+            if Fake.explore_fail:  # the server's own failures, as it sends them
+                return self._send(*Fake.explore_fail)
             if body["scope"].get("kind") == "graph" and Fake.quota["remaining"] == 0:
                 return self._send(429, {"error": "You have used your 5 free questions.", "code": "question_limit"})
             entities = {"graph:demo:T-1": {"name": "Test one", "type": "asset"}}
@@ -368,7 +371,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "TOKEN_FILE", str(tmp_path / "token.json"))
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.graph_left = [], False, "client", DRIVERS, 4
+    Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.graph_left, Fake.explore_fail = [], False, "client", DRIVERS, 4, None
     Fake.background, Fake.two_step, Fake.idle = [], False, False
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -1065,3 +1068,90 @@ def test_no_words_without_the_window_opens_the_bar_with_a_hint(server, capsys, m
     monkeypatch.setattr(term, "_reader", lambda ctx: lambda prompt="": (_ for _ in ()).throw(EOFError))
     out = run(capsys)
     assert "The Phaneris window needs one extra: pipx inject phaneris-cli textual" in out and "command bar" in out
+
+
+# ------------------------------------------------------------------ every way a question can fail, as an office user
+
+FAILURES = {
+    "not yours": (400, {"error": "T-1 is not one of your disclosures in this office. Questions and lookups are about one of your "
+                        "disclosures, or across the whole knowledge graph.", "code": "not_your_disclosure"}),
+    "graph limit": (429, {"error": "You have used your 5 free questions about the whole knowledge graph. 100 more cost $5.",
+                          "code": "question_limit"}),
+    "idle": (401, {"error": "You were signed out after 2 minutes without use.", "code": "idle_signed_out"}),
+    "off": (503, {"error": "Questions are not switched on yet."}),
+    "busy": (503, {"error": "The answer service is busy. Try again in a moment."}),
+    "failed": (502, {"error": "The answer service could not answer just now."}),
+}  # fmt: skip
+NEXT = {"not yours": "phaneris ask --graph", "graph limit": "phaneris buy", "idle": "phaneris login", "off": "Nothing was counted",
+        "busy": "Nothing was counted", "failed": "Nothing was counted"}  # fmt: skip
+
+
+@pytest.mark.parametrize("case", list(FAILURES))
+def test_every_question_failure_is_a_plain_message_with_the_next_step(server, capsys, monkeypatch, case):
+    signed(server, capsys, monkeypatch)
+    Fake.explore_fail = FAILURES[case]
+    err = failed(capsys, "ask", "Who owns it?", "--disclosure", "T-1")
+    assert "Traceback" not in err and FAILURES[case][1]["error"].split(".")[0] in err and NEXT[case] in err, err
+
+
+def test_a_conversation_stops_when_the_sign_in_ends_and_carries_on_after_a_busy_answer(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    answers = iter(["first", "second", "third", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    Fake.explore_fail = FAILURES["busy"]
+    out = run(capsys, "ask", "-i", "--disclosure", "T-1")  # busy: said, and the conversation goes on
+    assert out.count("The answer service is busy") == 3 and "Nothing was counted" in out
+    answers = iter(["first", "second"])
+    Fake.explore_fail = FAILURES["idle"]
+    err = failed(capsys, "ask", "-i", "--disclosure", "T-1")
+    assert "signed out" in err and "phaneris login" in err and len([x for x in Fake.log if x[1] == "/api/explore"]) == 4  # stopped
+
+
+def test_asking_about_something_that_is_not_a_disclosure(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")  # the disclosure the person came from
+    cli.main(["ask", "Who is this?", "--disclosure", "inv:a"])  # a person within its reach: asked about T-1
+    assert "inv:a is not a disclosure; asking about T-1, which it is reached from" in capsys.readouterr().err
+    assert posts("/api/explore")[-1]["scope"] == {"kind": "disclosure", "disclosure": "T-1"}
+    n = len(posts("/api/explore"))
+    err = failed(capsys, "ask", "Who is this?", "--disclosure", "pat:999999")  # out of reach, no terminal: nothing spent
+    assert "pat:999999 is not one of your disclosures" in err and 'phaneris ask --graph "..."  (4 free whole-graph questions left)' in err
+    assert len(posts("/api/explore")) == n
+    terminal(monkeypatch, "n")
+    assert "nothing was asked" in failed(capsys, "ask", "Who is this?", "--disclosure", "pat:999999") and len(posts("/api/explore")) == n
+    terminal(monkeypatch, "y")  # confirmed: the whole graph
+    run(capsys, "ask", "Who is this?", "--disclosure", "pat:999999")
+    assert posts("/api/explore")[-1]["scope"] == {"kind": "graph"}
+
+
+def test_ask_code_on_a_record_with_no_disclosure_open_spends_nothing(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    cli.remember(role="admin")  # an admin may look the record up anywhere; asking still needs a scope
+    Fake.role = "admin"
+    err = failed(capsys, "Ada Shared", "ASK")
+    assert "is not one of your disclosures" in err and "phaneris ask --graph" in err and not posts("/api/explore")
+
+
+def test_questions_in_the_line_mode_bar(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    from phaneris_cli import term
+
+    lines = iter(["Who owns it?", "/kg Who owns CAR-T?", "T-1 DES", "Who owns it?", "ask what else?"])
+
+    def read(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr(term, "_reader", lambda ctx: read)
+    ctx = term.Ctx(cli.signed_in(cli.global_options(["--server", server[0]])[0]), cli.Out(cli.global_options([])[0]), None)
+    Fake.explore_fail = None
+    term.command_bar(ctx)
+    out = capsys.readouterr().out
+    scopes = [p["scope"] for p in posts("/api/explore")]
+    assert "No disclosure is open, so nothing was asked." in out
+    assert scopes == [{"kind": "graph"}, {"kind": "disclosure", "disclosure": "T-1"}, {"kind": "disclosure", "disclosure": "T-1"}]
+    from phaneris_cli import history
+
+    assert not [h for h in history.load() if "owns" in h]  # questions are never kept

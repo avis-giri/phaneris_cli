@@ -132,11 +132,12 @@ def remember(**values):
 
 HINTS = {
     "browser_only": "Open the console in a browser for this.",
-    "question_limit": "See what is left with: phaneris usage. More: phaneris buy",
+    "question_limit": "Buy 100 more for $5: phaneris buy (Ctrl-B in the window). See what is left: phaneris usage",
+    "not_your_disclosure": "Open one of yours (phaneris disclosures), or ask the whole knowledge graph: phaneris ask --graph (/kg in the window)",
     "lookup_limit": "The limit resets within the hour.",
     "disclosure_required": "Add --disclosure ID (see: phaneris disclosures).",
     "password_change_required": "Sign in once at the console in a browser, choose your password, then run: phaneris login",
-    "out_of_reach": "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph",
+    "out_of_reach": "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph (/kg in the window)",
 }
 
 
@@ -148,6 +149,8 @@ def explain(e):
         return Fail(e.message, "Run: phaneris login")
     if e.status == 401:
         return Fail(e.message, "Your sign-in may have ended. Run: phaneris login")
+    if e.status in (502, 503):  # the answer service busy, or questions not switched on: nothing was counted
+        return Fail(e.message, "Nothing was counted. Try again in a minute.")
     if e.code == "two_step_setup_required":
         return Fail(e.message, "Sign in to the console in a browser, set up two-step sign-in, then run: phaneris login")
     return Fail(e.message, HINTS.get(e.code))
@@ -644,11 +647,47 @@ def quota_line(q):
 def ask_scope(api, args):
     if args.graph:
         return {"kind": "graph"}, "the whole knowledge graph"
-    ident = args.disclosure or store.read_config().get("last_disclosure")
+    last = store.read_config().get("last_disclosure")
+    ident = args.disclosure or last
     if not ident:
         fail("say what to ask about.", "Add --disclosure ID, or --graph for the whole knowledge graph.")
-    r = resolve_disclosure(api, ident)
-    return {"kind": "disclosure", "disclosure": r["id"]}, f"{r['name']} ({r['id']})"
+    r = find_row(api.get("/console"), ident)
+    if r:
+        remember(last_disclosure=r["id"])
+        return {"kind": "disclosure", "disclosure": r["id"]}, f"{r['name']} ({r['id']})"
+    return not_a_disclosure(api, ident, last)
+
+
+def not_a_disclosure(api, ident, last):
+    """A question about something that is not one of your disclosures (a person, a patent, a class, someone else's):
+    about the disclosure it was reached from, if it is within that one's reach; otherwise the whole knowledge graph,
+    only if the person confirms on a terminal (it spends a whole-graph question)."""
+    from urllib.parse import quote as q
+
+    if last and last != ident:
+        try:
+            api.get(f"/graph/record?node={q(ident, safe='')}&disclosure={q(last, safe='')}")
+            print(f"{ident} is not a disclosure; asking about {last}, which it is reached from.", file=sys.stderr)
+            return {"kind": "disclosure", "disclosure": last}, f"{ident}, within what {last} connects to"
+        except ApiError:
+            pass
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        fail(f"{ident} is not one of your disclosures.", f'Ask the whole knowledge graph instead: phaneris ask --graph "..."  ({graph_left(api)})')
+    answer = input(f"{ident} is not one of your disclosures. Ask the whole knowledge graph instead ({graph_left(api)})? [y/N] ").strip().lower()
+    if answer not in ("y", "yes"):
+        fail("nothing was asked.")
+    return {"kind": "graph"}, "the whole knowledge graph"
+
+
+def graph_left(api):
+    try:
+        g = api.get("/explore/usage").get("graph_quota") or {}
+    except ApiError:
+        return "whole-graph questions are metered"
+    if g.get("unlimited"):
+        return "no limit"
+    bought = f", {g['credits']} bought" if g.get("credits") else ""
+    return f"{g.get('free_left', 0)} free whole-graph question{'s' if g.get('free_left', 0) != 1 else ''} left{bought}"
 
 
 def strip_cites(text):
@@ -711,9 +750,10 @@ def ask_loop(api, scope, about, args, out):
         try:
             res = api.post("/explore", {"question": q, "history": history[-12:], "scope": scope})
         except ApiError as e:
-            if e.code == "question_limit":
-                fail(e.message, "More: phaneris buy")
-            print(s.bad(e.message))
+            f = explain(e)
+            if e.status in (0, 401) or e.code in ("question_limit", "not_your_disclosure"):
+                raise f from None  # nothing more can be asked here: say why and what to do
+            print(s.bad(f.message) + (s.dim("  " + f.hint) if f.hint else ""))
             continue
         print()
         print_answer(res, out, args.cites)

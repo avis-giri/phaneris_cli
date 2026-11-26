@@ -450,7 +450,11 @@ class AskView(Vertical):
                 self.app.call_from_thread(self.app.notify, getattr(e, "message", str(e)), severity="error")
                 return
             d = subject["id"] if subject["kind"] == "disclosure" else ctx.context
-            self.scope = {"kind": "disclosure", "disclosure": d} if d else {"kind": "graph"}
+            if not d:  # nothing to ask it about; the whole graph is metered, so only when the person asks for it
+                note = (f"{subject.get('name') or subject_text} is not a disclosure, and no disclosure is open, so nothing will be asked "
+                        "here. Open one of yours, or ask the whole knowledge graph: /kg QUESTION in the bar (or Ctrl-G).")  # fmt: skip
+                return self.app.call_from_thread(self.query_one(RichLog).write, Text(note, style="yellow"))
+            self.scope = {"kind": "disclosure", "disclosure": d}
         self.app.call_from_thread(self._started)
 
     def on_input_submitted(self, event):
@@ -471,10 +475,21 @@ class AskView(Vertical):
         log = self.query_one(RichLog)
         try:
             res = self.app.api.post("/explore", {"question": q, "history": self.turns[-12:], "scope": self.scope})
-        except ApiError as e:
-            self.app.call_from_thread(log.write, Text(e.message, style="red"))
-            if e.code in ("question_limit", "graph_limit") or e.status == 429:
-                self.app.call_from_thread(log.write, Text("Buy 100 more questions for $5: Ctrl-B, or phaneris buy.", style="dim"))
+        except ApiError as e:  # every failure is a plain line in the pane, with what to do next
+            from .main import explain
+
+            f = explain(e)
+            hint = f.hint or ""
+            if e.code == "question_limit" or e.status == 429:
+                hint = "Buy 100 more for $5: Ctrl-B (twice), or phaneris buy."
+            elif e.status == 401:
+                hint = "Sign in again: leave with Ctrl-Q and run phaneris login."
+            elif e.code == "not_your_disclosure":
+                hint = "Open one of yours, or ask the whole knowledge graph: /kg QUESTION in the bar (or Ctrl-G)."
+            self.app.call_from_thread(log.write, Text(f.message, style="red"))
+            if hint:
+                self.app.call_from_thread(log.write, Text(hint, style="dim"))
+            self.app.call_from_thread(self.app.refresh_status)
             return
         self.turns += [{"role": "user", "content": q}, {"role": "assistant", "content": res.get("answer", "")}]
         self.app.call_from_thread(log.write, Text(strip_cites(res.get("answer", ""))))

@@ -799,8 +799,10 @@ def screen_ask(ctx, subject):
     elif ctx.context:
         scope = {"kind": "disclosure", "disclosure": ctx.context}
         about = f"{subject.get('name', 'this record')}, within what {ctx.context} connects to"
-    else:
-        scope, about = {"kind": "graph"}, "the whole knowledge graph (metered)"
+    else:  # nothing to ask it about: the whole graph only if the person says so (it is metered)
+        from .main import not_a_disclosure
+
+        scope, about = not_a_disclosure(ctx.api, subject.get("node") or subject.get("name"), None)
     args = ctx.args
     args.cites = getattr(args, "cites", False)
     ask_loop(ctx.api, scope, about, args, ctx.out)
@@ -1059,6 +1061,29 @@ SCREENS = {
 # ------------------------------------------------------------------ the command bar
 
 
+def bar_question(ctx, question, explicit):
+    """A question typed in the line-mode bar: about the disclosure opened last, or the whole graph with /kg."""
+    from .main import explain, print_answer
+
+    if explicit == "graph":
+        scope = {"kind": "graph"}
+    elif ctx.context:
+        scope = {"kind": "disclosure", "disclosure": ctx.context}
+    else:
+        ctx.p(
+            ctx.s.warn("No disclosure is open, so nothing was asked.")
+            + ctx.s.dim("  Open one (T-000003 DES), or ask the whole knowledge graph: /kg QUESTION")
+        )
+        return
+    about = "the whole knowledge graph (metered)" if scope["kind"] == "graph" else scope["disclosure"]
+    ctx.p(ctx.s.dim(f"Asking about {about}..."))
+    try:
+        print_answer(ctx.api.post("/explore", {"question": question, "history": [], "scope": scope}), ctx.out, False)
+    except ApiError as e:
+        f = explain(e)
+        ctx.p(ctx.s.bad(f.message) + (ctx.s.dim("  next: " + f.hint) if f.hint else ""))
+
+
 def session_subjects(ctx):
     """Subjects seen in this session: what was opened, and the office's disclosure ids and names."""
     seen = list(ctx.recent)
@@ -1154,6 +1179,10 @@ def command_bar(ctx):
             continue
         if line.lower() in ("quit", "exit"):
             return
+        question = question_of(line)
+        if question:  # asked, not looked up; never written to the history file
+            bar_question(ctx, *question)
+            continue
         history.add(line)
         try:
             run(ctx, shlex.split(line))

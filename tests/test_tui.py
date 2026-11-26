@@ -476,3 +476,40 @@ def test_ctrl_b_twice_requests_the_pack(server, capsys, monkeypatch):  # noqa: F
             assert len(posts("/api/explore/request-pack")) == 1
 
     run(go())
+
+
+WINDOW_NEXT = {"not yours": "/kg QUESTION", "graph limit": "Ctrl-B", "idle": "phaneris login", "off": "Nothing was counted",
+               "busy": "Nothing was counted", "failed": "Nothing was counted"}  # fmt: skip
+
+
+@pytest.mark.parametrize("case", list(WINDOW_NEXT))
+def test_a_failed_question_is_shown_in_the_pane_with_the_next_step(server, capsys, monkeypatch, case):  # noqa: F811
+    from test_cli import FAILURES
+
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+    Fake.explore_fail = FAILURES[case]
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "Who owns it?")
+            await settle(pilot, app)
+            text = " ".join(log_of(app.query_one(tui.AskView)).split())
+            assert FAILURES[case][1]["error"].split(".")[0] in text and WINDOW_NEXT[case] in text
+            assert app.is_running  # shown in the pane, not a crash
+
+    run(go())
+
+
+def test_ask_on_a_record_with_no_disclosure_open_sends_nothing(server, capsys, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(Fake, "role", "admin")
+    app = make_app(server, capsys, monkeypatch, start="Ada Shared ASK")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            text = " ".join(log_of(app.query_one(tui.AskView)).split())
+            assert "is not a disclosure, and no disclosure is open, so nothing will be asked here" in text and "/kg QUESTION" in text
+            assert not posts("/api/explore")
+
+    run(go())
