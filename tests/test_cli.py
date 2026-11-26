@@ -1031,6 +1031,10 @@ def test_did_you_mean_picks_on_a_terminal(server, capsys, monkeypatch):
     assert "Deal stages" in run(capsys, "Tset one", "SCR")  # a disclosure's name
     terminal(monkeypatch, "")
     assert "cancelled" in failed(capsys, "Ada Shard", "GRF")
+    terminal(monkeypatch)  # the input ends (Ctrl-D): cancelled, no traceback
+    monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError))
+    assert "cancelled" in failed(capsys, "Ada Shard", "GRF")
+    assert "nothing chosen" in failed(capsys, "Ada", "DES")
 
 
 def test_a_mistyped_code_suggests_the_code(server, capsys, monkeypatch):

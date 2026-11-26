@@ -223,7 +223,10 @@ def _offer(ctx, text, found, what="match", example=None):
     ctx.p(ctx.s.bold(head))
     for line in lines:
         ctx.p("  " + line)
-    pick = input("Number (Enter cancels): ").strip()
+    try:
+        pick = input("Number (Enter cancels): ").strip()
+    except EOFError:  # Ctrl-D, or the input ended
+        pick = ""
     if not pick:
         fail("cancelled.")
     if not (pick.isdigit() and 1 <= int(pick) <= len(found)):
@@ -269,7 +272,10 @@ def _pick(ctx, hits, text):
     ctx.p(ctx.s.bold(f'"{text}" matches {len(hits)} records:'))
     for i, h in enumerate(hits, 1):
         ctx.p(f"  {i:>2}. {h.get('name') or h['id']}  {ctx.s.dim(h.get('type', ''))}  {ctx.s.dim(h['id'])}")
-    pick = input("Number: ").strip()
+    try:
+        pick = input("Number: ").strip()
+    except EOFError:
+        pick = ""
     if not (pick.isdigit() and 1 <= int(pick) <= len(hits)):
         fail("nothing chosen.")
     return hits[int(pick) - 1]
