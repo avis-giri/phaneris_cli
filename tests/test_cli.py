@@ -188,6 +188,14 @@ HISTORY = {
 }  # fmt: skip
 
 
+SUGGEST = {
+    "Ada Shard": [{"id": "inv:a", "name": "Ada Shared", "kind": "person", "score": 0.95},
+                  {"id": "inv:z", "name": "Ada Other", "kind": "person", "score": 0.8}],
+    "US 456788": [{"id": "pat:456789", "name": "A patent", "kind": "patent", "score": 0.93}],
+    "Tset one": [{"id": "T-1", "name": "Test one", "kind": "disclosure", "score": 0.9}],
+}  # fmt: skip
+
+
 class Fake(BaseHTTPRequestHandler):
     log = []
     watches = []
@@ -234,6 +242,11 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {"drivers": Fake.drivers})
         if url.path == "/api/board":
             return self._send(200, BOARD)
+        if url.path == "/api/graph/suggest":
+            found = SUGGEST.get(q["q"], [])
+            if "disclosure" not in q and Fake.role != "admin":  # like the server: only your disclosures and the codes
+                found = [x for x in found if x["kind"] in ("disclosure", "code")]
+            return self._send(200, {"query": q["q"], "suggestions": found})
         if url.path == "/api/watch":
             return self._send(200, {"watches": Fake.watches, "limit": 200})
         if url.path == "/api/feed":
@@ -298,7 +311,7 @@ class Fake(BaseHTTPRequestHandler):
                 hits = [h for h in hits if q["q"].lower() in h["name"].lower()]
                 return self._send(200, {"total": len(hits), "records": hits})
             if url.path == "/api/graph/record":
-                if q["node"] == "pat:999999":
+                if q["node"] in ("pat:999999", "pat:456788"):
                     return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
                 return self._send(
                     200,
@@ -619,8 +632,8 @@ def test_grammar():
     assert parse(["PORT"]) == ("", "PORT", {})
     assert parse(["Ada Shared", "GRF"]) == ("Ada Shared", "GRF", {})
     assert parse(['"Ada', 'Shared"', "des"]) == ("Ada Shared", "DES", {})
-    assert parse(["T-1"]) == ("T-1", "DES", {})
-    assert parse([]) == ("", "HELP", {})
+    assert parse(["T-1"]) == ("T-1", "DES", {"_default_code": True})  # no code given: what it is
+    assert parse([]) == ("", "HELP", {"_default_code": True})
     assert parse(["T-1", "CMP", "--sort", "date"]) == ("T-1", "CMP", {"sort": "date"})
     assert parse(["T-1 scr"]) == ("T-1", "SCR", {})
     assert parse(["Ada Shared GRF"]) == ("Ada Shared", "GRF", {})
@@ -982,3 +995,57 @@ def test_news_and_hist_fit_the_terminal(server, capsys, monkeypatch, cols):
     for words in (("feed", "--all"), ("T-1", "HIST")):
         out = run(capsys, *words)
         assert max(len(line) for line in out.splitlines()) <= cols
+
+
+def terminal(monkeypatch, *answers):
+    """A terminal that types the answers given."""
+    monkeypatch.setattr("sys.stdin", TTY())
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+    typed = iter(answers)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
+
+
+def test_did_you_mean_lists_close_matches_without_a_terminal(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")  # sets the disclosure the lookups are bounded to
+    err = failed(capsys, "Ada Shard", "GRF")
+    assert "No exact match for 'Ada Shard'. Did you mean: 1. Ada Shared (person) inv:a  2. Ada Other (person) inv:z" in err
+    assert "ask" not in err and "phaneris inv:a DES" in err
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Ada Shard", "disclosure": "T-1"}
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--json", "Ada Shard", "GRF"])
+    assert e.value.code != 0 and json.loads(capsys.readouterr().out)["suggestions"][0]["id"] == "inv:a"
+    assert "No exact match for 'US 456788'" in failed(capsys, "US 456788", "DES")  # a patent number a digit off
+    err = failed(capsys, "Nobody Atall", "GRF")  # nothing close: only then a question is suggested
+    assert "nothing named" in err and "phaneris ask" in err
+
+
+def test_did_you_mean_picks_on_a_terminal(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    terminal(monkeypatch, "1")
+    out = run(capsys, "Ada Shard", "GRF")
+    assert "Did you mean:" in out and "1. Ada Shared (person) inv:a" in out
+    assert [x[2]["node"] for x in Fake.log if x[1] == "/api/graph/map"][-1] == "inv:a"  # the same code, on the pick
+    terminal(monkeypatch, "1")
+    assert "Deal stages" in run(capsys, "Tset one", "SCR")  # a disclosure's name
+    terminal(monkeypatch, "")
+    assert "cancelled" in failed(capsys, "Ada Shard", "GRF")
+
+
+def test_a_mistyped_code_suggests_the_code(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    err = failed(capsys, "T-1", "SRC")
+    assert "No exact code for 'SRC'. Did you mean: 1. SCR (scores)" in err
+    terminal(monkeypatch, "1")
+    assert "Deal stages" in run(capsys, "T-1", "SRC")
+    terminal(monkeypatch, "1")
+    assert "2 versions kept" in run(capsys, "T-1", "HSIT")
+
+
+def test_no_disclosure_open_still_suggests_disclosures(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    err = failed(capsys, "Tset one", "SCR")
+    assert "1. Test one (disclosure) T-1" in err
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Tset one"}
+    assert "Open one first" in failed(capsys, "Ada Shard", "GRF")  # no close disclosure: the plain advice

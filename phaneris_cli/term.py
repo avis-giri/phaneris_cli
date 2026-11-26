@@ -97,12 +97,13 @@ def parse(tokens):
     subject = " ".join(words).strip().strip("\"'")
     if not code:
         code = "DES" if subject else "HELP"
+        opts["_default_code"] = True
     return subject, code, opts
 
 
 def resolve(ctx, text):
     """The subject a text names: one of your disclosures, or a knowledge graph record within reach."""
-    from .main import disclosure_rows, fail, find_row, remember
+    from .main import disclosure_rows, find_row, remember
 
     if not text:
         return {"kind": "none"}
@@ -121,12 +122,15 @@ def resolve(ctx, text):
         return subject
     if ":" in text and " " not in text:
         return _record(ctx, text, text)
+    if ctx.role != "admin" and not _around(ctx):
+        return did_you_mean(
+            ctx, text, ("records are looked up around one of your disclosures.", "Open one first, for example: phaneris T-000003 DES")
+        )
     hits = _search(ctx, text)
     exact = [h for h in hits if (h.get("name") or "").lower() == text.lower() or h.get("id", "").lower() == text.lower()]
     pool = exact or hits
     if not pool:
-        where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
-        fail(f'nothing named "{text}" within reach{where}.', "Try part of the name, or open a disclosure first: phaneris T-ID DES")
+        return did_you_mean(ctx, text)
     if len(pool) == 1:
         h = pool[0]
     else:
@@ -165,18 +169,93 @@ def _search(ctx, text):
 
 
 def _record(ctx, node, label):
-    from .main import fail
 
     try:
         rec = ctx.api.get("/graph/record?" + _context_query(ctx, node=node))
     except ApiError as e:
         if e.code == "out_of_reach" or e.status == 404:
             where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
-            fail(f"{label} is not within reach{where}.", "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph")
+            return did_you_mean(
+                ctx,
+                label,
+                (
+                    f"{label} is not within reach{where}.",
+                    "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph",
+                ),
+            )
         raise
     r = rec.get("record") or {}
     _recent(ctx, node)
     return {"kind": "record", "node": node, "name": r.get("name") or node, "type": r.get("type", ""), "data": rec}
+
+
+def _around(ctx):
+    if ctx.args and getattr(ctx.args, "disclosure", None):
+        ctx.context = ctx.args.disclosure
+    return ctx.context
+
+
+def suggestions(ctx, text):
+    """Close matches the server finds among what this person may see (one lookup); none if it cannot answer."""
+    query = f"q={_quote(text)}" + (f"&disclosure={_quote(_around(ctx))}" if _around(ctx) else "")
+    try:
+        return ctx.api.get("/graph/suggest?" + query).get("suggestions") or []
+    except ApiError:
+        return []
+
+
+def _interactive(ctx):
+    return not ctx.out.as_json and getattr(ctx, "interactive", True) and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _offer(ctx, text, found, what="match"):
+    """Show numbered close matches. On a terminal, return the one picked (None: Enter cancels); otherwise list them
+    and stop with an error."""
+    from .main import fail
+
+    lines = [f"{i}. {x['name']} ({x['kind']}) {x['id']}" for i, x in enumerate(found, 1)]
+    head = f"No exact {what} for '{text}'. Did you mean:"
+    if not _interactive(ctx):
+        if ctx.out.as_json:
+            ctx.out.data({"error": f"No exact {what} for '{text}'.", "suggestions": found})
+        fail(head + " " + "  ".join(lines), "Run it with the id, for example: phaneris " + found[0]["id"] + " DES")
+    ctx.p(ctx.s.bold(head))
+    for line in lines:
+        ctx.p("  " + line)
+    pick = input("Number (Enter cancels): ").strip()
+    if not pick:
+        fail("cancelled.")
+    if not (pick.isdigit() and 1 <= int(pick) <= len(found)):
+        fail("no such number.")
+    return found[int(pick) - 1]
+
+
+def did_you_mean(ctx, text, otherwise=None):
+    """The subject meant by a name that matched nothing: close matches to pick from, or, if there are none, the plain
+    error (suggesting a question only then)."""
+    from .main import fail
+
+    found = [x for x in suggestions(ctx, text) if x["kind"] != "code"]
+    if not found:
+        where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
+        message, hint = otherwise or (f'nothing named "{text}" within reach{where}.', 'Try part of the name, or ask: phaneris ask "..."')
+        fail(message, hint)
+    x = _offer(ctx, text, found)
+    if x["kind"] == "disclosure":
+        return resolve(ctx, x["id"])
+    _recent(ctx, x["id"])
+    if x["kind"] == "class" and ctx.opts.get("_code") == "CLS":
+        return {"kind": "class", "code": x["name"], "name": x["name"]}
+    return _record(ctx, x["id"], x["name"])
+
+
+def close_codes(word):
+    """Function codes a mistyped one may have meant (SRC: SCR)."""
+    import difflib
+
+    w = word.upper()
+    swapped = [c for c in CODES if len(c) == len(w) and sorted(c) == sorted(w)]
+    return list(dict.fromkeys(swapped + difflib.get_close_matches(w, list(CODES), 3, 0.6)))
 
 
 def _pick(ctx, hits, text):
@@ -203,6 +282,14 @@ def run(ctx, tokens):
 
     subject_text, code, opts = parse(tokens)
     ctx.opts = opts
+    words = subject_text.split()
+    if opts.get("_default_code") and len(words) > 1 and re.fullmatch(r"[A-Z]{2,5}", words[-1]) and words[-1] not in CODES:
+        near = close_codes(words[-1])
+        if near:  # "T-000003 SRC": a mistyped code, not part of the name
+            found = [{"id": c, "name": f"{c} ({CODES[c][0].split(':')[0].lower()})", "kind": "code"} for c in near]
+            code = _offer(ctx, words[-1], found, "code")["id"]
+            subject_text = " ".join(words[:-1])
+    opts["_code"] = code
     if opts.get("disclosure"):
         ctx.context = opts["disclosure"]
     if code in ("PORT",) and subject_text:
