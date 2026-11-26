@@ -208,17 +208,18 @@ def _interactive(ctx):
     return not ctx.out.as_json and getattr(ctx, "interactive", True) and sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _offer(ctx, text, found, what="match"):
-    """Show numbered close matches. On a terminal, return the one picked (None: Enter cancels); otherwise list them
-    and stop with an error."""
+def _offer(ctx, text, found, what="match", example=None):
+    """Show numbered close matches. On a terminal, return the one picked (Enter cancels); otherwise list them and stop
+    with an error."""
     from .main import fail
 
-    lines = [f"{i}. {x['name']} ({x['kind']}) {x['id']}" for i, x in enumerate(found, 1)]
+    lines = [f"{i}. {x['name']}" + ("" if x["kind"] == "code" else f" ({x['kind']}) {x['id']}") for i, x in enumerate(found, 1)]
     head = f"No exact {what} for '{text}'. Did you mean:"
     if not _interactive(ctx):
         if ctx.out.as_json:
             ctx.out.data({"error": f"No exact {what} for '{text}'.", "suggestions": found})
-        fail(head + " " + "  ".join(lines), "Run it with the id, for example: phaneris " + found[0]["id"] + " DES")
+        example = example or f"the id, for example: phaneris {found[0]['id']} {ctx.opts.get('_code') or 'DES'}"
+        fail(head + " " + "  ".join(lines), "Run it with " + example)
     ctx.p(ctx.s.bold(head))
     for line in lines:
         ctx.p("  " + line)
@@ -287,7 +288,8 @@ def run(ctx, tokens):
         near = close_codes(words[-1])
         if near:  # "T-000003 SRC": a mistyped code, not part of the name
             found = [{"id": c, "name": f"{c} ({CODES[c][0].split(':')[0].lower()})", "kind": "code"} for c in near]
-            code = _offer(ctx, words[-1], found, "code")["id"]
+            example = f"the code, for example: phaneris {' '.join(words[:-1])} {near[0]}"
+            code = _offer(ctx, words[-1], found, "code", example)["id"]
             subject_text = " ".join(words[:-1])
     opts["_code"] = code
     if opts.get("disclosure"):

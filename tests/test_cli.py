@@ -1010,7 +1010,7 @@ def test_did_you_mean_lists_close_matches_without_a_terminal(server, capsys, mon
     run(capsys, "T-1", "DES")  # sets the disclosure the lookups are bounded to
     err = failed(capsys, "Ada Shard", "GRF")
     assert "No exact match for 'Ada Shard'. Did you mean: 1. Ada Shared (person) inv:a  2. Ada Other (person) inv:z" in err
-    assert "ask" not in err and "phaneris inv:a DES" in err
+    assert "ask" not in err and "phaneris inv:a GRF" in err  # the same code, on the match
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Ada Shard", "disclosure": "T-1"}
     with pytest.raises(SystemExit) as e:
         cli.main(["--json", "Ada Shard", "GRF"])
@@ -1036,7 +1036,7 @@ def test_did_you_mean_picks_on_a_terminal(server, capsys, monkeypatch):
 def test_a_mistyped_code_suggests_the_code(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     err = failed(capsys, "T-1", "SRC")
-    assert "No exact code for 'SRC'. Did you mean: 1. SCR (scores)" in err
+    assert "No exact code for 'SRC'. Did you mean: 1. SCR (scores)\nnext: Run it with the code, for example: phaneris T-1 SCR" in err
     terminal(monkeypatch, "1")
     assert "Deal stages" in run(capsys, "T-1", "SRC")
     terminal(monkeypatch, "1")
