@@ -790,14 +790,14 @@ def screen_hist(ctx, subject):
     if len(values) > 1:
         ctx.p(f"  {draw.sparkline(s, values, min(40, len(values) * 3))}  " + s.dim("deal chance, oldest to newest"))
         ctx.p()
-    ctx.p(s.bold(f"  {'Scored':<11} {'Deal':>7} {'Full':>7}  {'Rec.':<8} {'From':<16} What moved"))
+    ctx.p(s.bold(f"  {'Scored':<11} {'Deal':>7} {'Full':>7}  {'Rec.':<8} {'From':<21} What moved"))
     for v in versions:
         source = "data import" if v["source"] == "import" else f"re-score {v.get('job_public_id') or ''}".strip()
         moves = [_move_text(m) for m in v.get("moved") or []]
         moved = "; ".join(moves) or s.dim("first kept version" if v is versions[-1] else "nothing")
         rec = v.get("recommendation") or ""
         deal, full = pct(v.get("deal_chance")), pct(v.get("full_estimate"))
-        row = f"  {v['scored_at'][:10]:<11} {deal:>7} {full:>7}  {rec:<8} {source[:16]:<16} "
+        row = f"  {v['scored_at'][:10]:<11} {deal:>7} {full:>7}  {rec:<8} {source[:21]:<21} "
         if visible_len(row + moved) <= s.width:
             ctx.p(row + moved)
         else:  # one move a line under the row, so none is cut
@@ -805,7 +805,10 @@ def screen_hist(ctx, subject):
             for m in moves:
                 ctx.p(f"      {m}")
     why = h.get("why")
-    if why:
+    if why and len(versions) > 1 and not versions[0].get("moved"):
+        ctx.p()
+        ctx.p(s.dim("Nothing moved between the two latest versions."))
+    elif why:
         ctx.p()
         ctx.p(s.bold("Why the latest version moved") + s.dim("   the fitted model's terms in the two latest versions, in log-odds"))
         if not why.get("available"):
@@ -940,7 +943,7 @@ def screen_news(ctx, subject):
         for e in item["events"]:
             when = e["at"][:10]
             source = {"graph load": "", "re-score": "re-score", "new data import": "new data"}.get(e.get("source"), "")
-            ctx.p(_fit(s, f"  {s.dim(when)}  {event_text(s, e)}" + (f"  {s.dim(source)}" if source else "")))
+            ctx.p(f"  {s.dim(when)}  {event_text(s, e)}" + (f"  {s.dim(source)}" if source else ""))  # wraps, never cut
         if not one:
             ctx.p()
     if res.get("hidden"):

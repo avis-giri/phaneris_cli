@@ -963,7 +963,12 @@ def test_hist_lists_versions_and_why(server, capsys, monkeypatch):
     assert "2 versions kept" in out and out.index("2026-11-25") < out.index("2026-10-01")
     assert "re-score J-9" in out and "data import" in out and "      deal chance 5.0% to 8.0%\n      ipd score 0.50 to 0.70" in out
     monkeypatch.setenv("COLUMNS", "140")
-    assert "re-score J-9     deal chance 5.0% to 8.0%; ipd score 0.50 to 0.70" in run(capsys, "T-1", "HIST")
+    assert "re-score J-9          deal chance 5.0% to 8.0%; ipd score 0.50 to 0.70" in run(capsys, "T-1", "HIST")
+    moved, HISTORY["versions"][0]["moved"] = HISTORY["versions"][0]["moved"], []
+    try:
+        assert "Nothing moved between the two latest versions." in run(capsys, "T-1", "HIST")
+    finally:
+        HISTORY["versions"][0]["moved"] = moved
     assert "first kept version" in out and "IP defensibility score" in out and "+0.40" in out and "+0.45 log-odds" in out
     assert json.loads(run(capsys, "--json", "T-1", "HIST"))["why"]["available"] is True
     assert "History" in run(capsys, "T-1", "SCR") and "5.0% on 2026-10-01 to 8.0% now, 2 versions" in run(capsys, "T-1", "SCR")
