@@ -29,6 +29,7 @@ from .style import Style, pct
 
 MAX_PANES = 4
 IDLE_SECONDS = 30 * 60
+STATUS_SECONDS = 60
 CODES = list(term.CODES)
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
@@ -112,12 +113,24 @@ class ScreenView(VerticalScroll):
     @work(thread=True, exclusive=True, group="draw")
     def redraw(self):
         width = max(30, self.size.width - 3)
-        text = self.app.draw_screen(self.line, width, self.api)
+        text = self.app.draw_screen(self.line, width, self.api, view=self)
         self.app.call_from_thread(self._show, text, width)
 
     def _show(self, text, width):
         self.drawn_width = width + 3
         self.query_one(".body", Static).update(Text.from_ansi(text))
+        choices = getattr(self, "choices", None)
+        if choices and not self.query("#choices"):
+            box = OptionList(*[Option(label, id=str(i)) for i, (label, _) in enumerate(choices)], id="choices")
+            self.mount(box)
+            box.focus()
+        self.app.server_answered()
+
+    def on_option_list_option_selected(self, event):
+        """A row of matches: Enter opens that one with the same code, in a new tab (the list stays, to open others)."""
+        if event.option_list.id == "choices":
+            event.stop()
+            self.app.open_tab(self.choices[int(event.option.id)][1])
 
     @work(thread=True, group="watch")
     def action_watch(self):
@@ -628,6 +641,7 @@ class PhanerisApp(App):
         self.query_one("#bar").focus()
         self.refresh_status()
         self.set_interval(5, self.check_idle_lock)
+        self.set_interval(STATUS_SECONDS, self.refresh_status)  # a key press, not this, is what counts as activity
         if self.start_line:
             self.open_tab(self.start_line)
         elif "default" in read_layouts():
@@ -653,8 +667,9 @@ class PhanerisApp(App):
         c.opts = {}
         return c
 
-    def draw_screen(self, line, width, api):
-        """A screen's text, drawn `width` characters wide, as ANSI."""
+    def draw_screen(self, line, width, api, view=None):
+        """A screen's text, drawn `width` characters wide, as ANSI. A subject that needs choosing leaves its choices on
+        the view, which shows them as rows."""
         from .main import Fail, Out, explain
 
         lines = []
@@ -664,6 +679,12 @@ class PhanerisApp(App):
         ctx.interactive = False
         try:
             term.run(ctx, shlex.split(line))
+        except term.Choose as c:
+            if view is not None:
+                view.choices = c.choices
+                lines.append(style.bold(c.message.split(":")[0] + ":") + style.dim("  Enter opens one in a new tab."))
+            else:
+                lines.append(style.bad("error: ") + c.message + "\n" + style.dim("next: " + c.hint))
         except Fail as f:
             lines.append(style.bad("error: ") + f.message + (("\n" + style.dim("next: " + f.hint)) if f.hint else ""))
         except ApiError as e:
@@ -880,24 +901,33 @@ class PhanerisApp(App):
     def refresh_status(self):
         parts = []
         try:
-            me = self.api.get("/auth/me")["user"]
+            me = self.api.get("/auth/me", background=True)["user"]
             parts.append(f"{me['display_name']} ({me['role']})")
             parts.append(f"office {me['workspace']}")
         except ApiError as e:
             parts.append(e.message)
         try:
-            q = self.api.get("/explore/usage")["quota"]
+            q = self.api.get("/explore/usage", background=True)["quota"]
             parts.append(
                 "questions: no limit" if q.get("unlimited") else f"questions {q['free_left']} of {q['limit']} free, {q.get('credits', 0)} bought"
             )
         except ApiError:
             pass
         try:
-            v = self.api.get("/health").get("version", "?")
+            v = self.api.get("/health", background=True).get("version", "?")
         except ApiError:
-            v = "unreachable"
-        parts.append(f"server {v} · phaneris {__version__} · ? help")
+            v = None
+        self.server_down = v is None
+        if v is None and parts and parts[0].startswith("Could not reach"):
+            parts[0] = "server not answering"
+        parts.append(f"server {v or 'not answering'} · phaneris {__version__} · ? help")
         self.call_from_thread(self.query_one("#status", Static).update, "  ·  ".join(parts))
+
+    def server_answered(self):
+        """A screen loaded: if the status line said the server was not answering, check again now."""
+        if getattr(self, "server_down", False):
+            self.server_down = False
+            self.refresh_status()
 
     def action_help(self):
         self.push_screen(HelpScreen())

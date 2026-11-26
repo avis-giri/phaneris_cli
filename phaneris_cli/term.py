@@ -14,6 +14,7 @@ import textwrap
 
 from . import draw
 from .api import ApiError
+from .main import Fail
 from .style import pct, visible_len
 
 CODES = {
@@ -33,7 +34,19 @@ CODES = {
 }
 CPC_RX = re.compile(r"^[A-HY]\d{2}[A-Z](\s?\d{1,4}/\d{1,6})?$", re.I)
 PATENT_RX = re.compile(r"^(?:US)?\s*([\d,]{6,13})$", re.I)
+RECORD_RX = re.compile(r"^(?:(?:author|inventor|pat|cpc|assignee|institution|domain|trial|grant|pub|topic|cohort):\S|T-\d)", re.I)
 STAGE_LABEL = {"out": "Going out", "licensed": "Licensed", "spinout": "Spin-out", "maintained": "Maintained", "inactive": "Inactive"}
+
+
+def arg(ident):
+    """A subject as the bar and the command line take it: quoted when it has a space (author:ETHAN STANCLIFFE)."""
+    ident = str(ident)
+    return f'"{ident}"' if " " in ident else ident
+
+
+def is_record_id(text):
+    """Text that names a record by its id, spaces and all (author:ETHAN STANCLIFFE, pat:8916381, T-020387)."""
+    return bool(RECORD_RX.match(text.strip()))
 
 
 class Ctx:
@@ -120,8 +133,8 @@ def resolve(ctx, text):
         _recent(ctx, row["name"])
         _recent(ctx, row["id"])
         return subject
-    if ":" in text and " " not in text:
-        return _record(ctx, text, text)
+    if is_record_id(text) or (":" in text and " " not in text):
+        return _record(ctx, text.strip(), text.strip())
     if ctx.role != "admin" and not _around(ctx):
         return did_you_mean(
             ctx, text, ("records are looked up around one of your disclosures.", "Open one first, for example: phaneris T-000003 DES")
@@ -140,6 +153,7 @@ def resolve(ctx, text):
 
 
 def _recent(ctx, subject):
+    subject = arg(subject)  # Tab offers it the way the bar takes it
     if subject in ctx.recent:
         ctx.recent.remove(subject)
     ctx.recent.insert(0, subject)
@@ -189,6 +203,21 @@ def _record(ctx, node, label):
     return {"kind": "record", "node": node, "name": r.get("name") or node, "type": r.get("type", ""), "data": rec}
 
 
+class Choose(Fail):
+    """A subject that needs choosing where nothing can ask (a full-screen pane, a script): fails like any error on the
+    command line, and carries (label, line) choices a pane shows as rows to open."""
+
+    def __init__(self, message, hint, choices):
+        super().__init__(message, hint)
+        self.choices = choices
+
+
+def _line(ctx, ident, code):
+    """The bar line that opens a record with a code, around the disclosure in use."""
+    around = f" --disclosure {arg(ctx.context)}" if ctx.context and ctx.role != "admin" and not str(ident).startswith("T-") else ""
+    return f"{arg(ident)} {code}{around}"
+
+
 def _around(ctx):
     if ctx.args and getattr(ctx.args, "disclosure", None):
         ctx.context = ctx.args.disclosure
@@ -218,8 +247,14 @@ def _offer(ctx, text, found, what="match", example=None):
     if not _interactive(ctx):
         if ctx.out.as_json:
             ctx.out.data({"error": f"No exact {what} for '{text}'.", "suggestions": found})
-        example = example or f"the id, for example: phaneris {found[0]['id']} {ctx.opts.get('_code') or 'DES'}"
-        fail(head + " " + "  ".join(lines), "Run it with " + example)
+        code = ctx.opts.get("_code") or "DES"
+        example = example or f"the id, for example: phaneris {arg(found[0]['id'])} {code}"
+        if what == "code":
+            subject = ctx.opts.get("_subject", "")
+            choices = [(x["name"], f"{subject} {x['id']}".strip()) for x in found]
+        else:
+            choices = [(f"{x['name']}  {x['kind']}  {x['id']}", _line(ctx, x["id"], code)) for x in found]
+        raise Choose(head + " " + "  ".join(lines), "Run it with " + example, choices)
     ctx.p(ctx.s.bold(head))
     for line in lines:
         ctx.p("  " + line)
@@ -268,7 +303,9 @@ def _pick(ctx, hits, text):
     hits = hits[:12]
     if ctx.out.as_json or not sys.stdin.isatty() or not getattr(ctx, "interactive", True):
         names = "; ".join(f"{h['id']} ({h.get('name') or ''})" for h in hits[:6])
-        fail(f'"{text}" matches {len(hits)} records: {names}.', "Use the record id, for example: phaneris inventor:123 DES")
+        code = ctx.opts.get("_code") or "DES"
+        raise Choose(f'"{text}" matches {len(hits)} records: {names}.', f"Use the record id, for example: phaneris {arg(hits[0]['id'])} {code}",
+                     [(f"{h.get('name') or h['id']}  {h.get('type', '')}  {h['id']}", _line(ctx, h["id"], code)) for h in hits])  # fmt: skip
     ctx.p(ctx.s.bold(f'"{text}" matches {len(hits)} records:'))
     for i, h in enumerate(hits, 1):
         ctx.p(f"  {i:>2}. {h.get('name') or h['id']}  {ctx.s.dim(h.get('type', ''))}  {ctx.s.dim(h['id'])}")
@@ -294,6 +331,7 @@ def run(ctx, tokens):
         near = close_codes(words[-1])
         if near:  # "T-000003 SRC": a mistyped code, not part of the name
             found = [{"id": c, "name": f"{c} ({CODES[c][0].split(':')[0].lower()})", "kind": "code"} for c in near]
+            opts["_subject"] = " ".join(words[:-1])
             example = f"the code, for example: phaneris {' '.join(words[:-1])} {near[0]}"
             code = _offer(ctx, words[-1], found, "code", example)["id"]
             subject_text = " ".join(words[:-1])
@@ -977,9 +1015,9 @@ def open_line(item, event=None):
     its timeline (a class: its trends), around the disclosure it is watched from."""
     target = item["target"]
     if item["kind"] == "disclosure":
-        return f"{target} {'HIST' if event and event['event'] == 'score moved' else 'OWN'}"
+        return f"{arg(target)} {'HIST' if event and event['event'] == 'score moved' else 'OWN'}"
     code = "CLS" if target.startswith("cpc:") else "OWN" if target.startswith("pat:") else "DES"
-    return f"{target} {code}" + (f" --disclosure {item['context']}" if item.get("context") else "")
+    return f"{arg(target)} {code}" + (f" --disclosure {arg(item['context'])}" if item.get("context") else "")
 
 
 def event_text(s, e):

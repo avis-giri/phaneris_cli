@@ -25,7 +25,7 @@ class Api:
         self.server = server.rstrip("/")
         self.token = token
 
-    def call(self, method, path, body=None, raw=False):
+    def call(self, method, path, body=None, raw=False, background=False):
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.server + "/api" + path, data=data, method=method)
         req.add_header("User-Agent", f"phaneris-cli/{__version__} ({platform.system()})")
@@ -34,6 +34,8 @@ class Api:
             req.add_header("Content-Type", "application/json")
         if self.token:
             req.add_header("Authorization", f"Bearer {self.token}")
+        if background:  # a refresh nobody asked for (the status line): not a sign of the person being active
+            req.add_header("X-Phaneris-Background", "1")
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as res:  # noqa: S310  the server URL is https or this machine
                 payload = res.read()

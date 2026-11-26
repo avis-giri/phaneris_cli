@@ -199,6 +199,7 @@ SUGGEST = {
 class Fake(BaseHTTPRequestHandler):
     log = []
     watches = []
+    background = []
     seen = False
     approved = False
     role = "client"
@@ -226,6 +227,8 @@ class Fake(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         Fake.log.append(("GET", url.path, q))
+        if self.headers.get("X-Phaneris-Background"):
+            Fake.background.append(url.path)
         if url.path == "/api/health":
             return self._send(200, {"ok": True, "version": "abc1234"})
         if url.path == "/api/workspaces":
@@ -307,7 +310,9 @@ class Fake(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
             if url.path == "/api/graph/search":
                 hits = [{"id": "inv:a", "type": "inventor", "name": "Ada Shared", "cite": "graph:phaneron:inv:a"},
-                        {"id": "inv:z", "type": "inventor", "name": "Ada Other", "cite": "graph:phaneron:inv:z"}]  # fmt: skip
+                        {"id": "inv:z", "type": "inventor", "name": "Ada Other", "cite": "graph:phaneron:inv:z"},
+                        {"id": "author:ETHAN STANCLIFFE", "type": "author", "name": "ETHAN STANCLIFFE"},
+                        {"id": "pat:PCTUS2023082308", "type": "patent", "name": "Ethan Stancliff patent"}]  # fmt: skip
                 hits = [h for h in hits if q["q"].lower() in h["name"].lower()]
                 return self._send(200, {"total": len(hits), "records": hits})
             if url.path == "/api/graph/record":
@@ -387,6 +392,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
     Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.watches, Fake.seen = [], False, "client", DRIVERS, [], False
+    Fake.background = []
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", tmp_path
@@ -1053,3 +1059,22 @@ def test_no_disclosure_open_still_suggests_disclosures(server, capsys, monkeypat
     assert "1. Test one (disclosure) T-1" in err
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Tset one"}
     assert "Open one first" in failed(capsys, "Ada Shard", "GRF")  # no close disclosure: the plain advice
+
+
+def test_record_ids_with_spaces_open_and_are_quoted(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    assert "A patent" in run(capsys, "author:ETHAN STANCLIFFE", "DES")  # one quoted word on the command line
+    assert [x[2]["node"] for x in Fake.log if x[1] == "/api/graph/record"][-1] == "author:ETHAN STANCLIFFE"
+    run(capsys, "go", "author:ETHAN STANCLIFFE DES")  # unquoted, in one line
+    assert [x[2]["node"] for x in Fake.log if x[1] == "/api/graph/record"][-1] == "author:ETHAN STANCLIFFE"
+    err = failed(capsys, "Ethan", "DES")  # two matches, no terminal: the hint names a real id, quoted
+    assert '"Ethan" matches 2 records' in err and 'phaneris "author:ETHAN STANCLIFFE" DES' in err and "inventor:123" not in err
+    from phaneris_cli import term
+
+    assert term.arg("author:ETHAN STANCLIFFE") == '"author:ETHAN STANCLIFFE"' and term.arg("pat:1") == "pat:1"
+    assert term.is_record_id("author:ETHAN STANCLIFFE") and term.is_record_id("T-020387") and not term.is_record_id("Ethan Stancliff")
+    ctx = term.Ctx(cli.signed_in(cli.global_options(["--server", server[0]])[0]), cli.Out(cli.global_options([])[0]), None)
+    ctx.opts = {}
+    term.resolve(ctx, "author:ETHAN STANCLIFFE")
+    assert ctx.recent[0] == '"author:ETHAN STANCLIFFE"'  # Tab offers it the way the bar takes it

@@ -300,3 +300,46 @@ def test_guide_pane_from_the_bar(server, capsys, monkeypatch):  # noqa: F811
             assert "Guide watch" in titles and "Guide" in titles
 
     run(go())
+
+
+def test_ambiguous_names_become_rows_to_open(server, capsys, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(Fake, "role", "admin")
+    app = make_app(server, capsys, monkeypatch, start="Ethan DES")
+
+    async def go():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, app)
+            box = app.query_one("#choices", tui.OptionList)
+            assert box.option_count == 2 and "matches 2 records" in text_of(app) and "error" not in text_of(app)
+            box.focus()
+            box.highlighted = 0
+            await pilot.press("enter")
+            await settle(pilot, app)
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert "author:ETHAN STANCLIFFE DES" in titles
+            assert [x[2]["node"] for x in Fake.log if x[1] == "/api/graph/record"][-1] == "author:ETHAN STANCLIFFE"
+
+    run(go())
+
+
+def test_status_line_refreshes_and_says_when_the_server_is_not_answering(server, capsys, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(tui, "STATUS_SECONDS", 0.3)
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, app)
+            status = lambda: str(app.query_one("#status").render())  # noqa: E731
+            assert "server abc1234" in status() and "/api/health" in Fake.background  # marked as not the person's activity
+            real = app.api.server
+            app.api.server = "http://127.0.0.1:9"  # nothing listens there
+            await pilot.pause(0.8)
+            await app.workers.wait_for_complete()
+            assert "server not answering" in status() and "Could not reach" not in status()
+            app.api.server = real
+            before = len([x for x in Fake.log if x[1] == "/api/health"])
+            await pilot.pause(0.8)
+            await app.workers.wait_for_complete()
+            assert len([x for x in Fake.log if x[1] == "/api/health"]) > before and "server abc1234" in status()
+
+    run(go())
