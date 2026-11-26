@@ -19,10 +19,47 @@ DOCS = "https://www.phaneris.co/docs/terminal"
 
 TOPICS = [
     (
+        "window",
+        "The Phaneris window",
+        """
+Type phaneris and press Enter. The Phaneris window opens: a bar at the top, panes below it, and a status line at the bottom. It needs one optional extra, added once:
+
+  pipx inject phaneris-cli textual
+
+Without it, phaneris opens the line-mode command bar instead and says how to add the window.
+
+What you see first:
+
+  The Phaneris window   type in the bar above, then Enter.
+    Open anything   a disclosure id or title, a person, an owner, a patent or a class, then a code
+                    T-000003 SCR    "Carl H. June" GRF    US 8916381 OWN    A61K CLS    (no code: DES)
+    Ask             a question ending in ?, or ask ...    about the disclosure that is open
+                    /kg QUESTION or Ctrl-G                 across the whole knowledge graph
+  Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought.  Buying more: Ctrl-B or phaneris buy.
+  PORT  Office board
+  #  ID        Name                   Deal   Rec.    Real  Metrics
+  1  T-000003  Cancer T-cell therapy  5.7%   Review  6/9
+
+Open anything by typing it: a disclosure id or title, a person, an owner, a patent number or a class, then a code (Enter alone opens DES, what it is). Tab completes from what you ran before. A name that matches several records, or nothing, shows the matches as rows; Enter opens one. On the board, Enter opens a disclosure's scores.
+
+Ask by typing a question: anything that ends with "?", or starts with ask or /ask. It is asked about the disclosure that is open (the one in the pane in focus, or the last one you opened). To ask across the whole knowledge graph instead, type /kg QUESTION (or ask --graph QUESTION), or press Ctrl-G to send every question there until you press it again.
+
+The scope chip beside the bar shows where Enter will send a question before anything is sent: "About T-000003", "Whole knowledge graph", or "No disclosure open", in which case nothing is sent until you open one or choose the whole graph. Each scope keeps its own conversation in its own tab, with the earlier questions, so a follow-up has context. Questions are never written to the history file.
+
+An answer lists the records it cites as rows: Enter opens one (DES), g opens its map (GRF). Administrators can open any of them. Everyone else can open a record within reach of one of their disclosures; for any other, the window shows the brief the answer returned and says why it cannot be opened further.
+
+A name you cannot reach is never a dead end: the first suggestion is "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)". It is sent only when you choose it and press Enter.
+
+Allowances: questions about your disclosures are 10 free in any 12 hours; questions across the whole knowledge graph are 5 free in total; after that, bought questions are shared by both, 100 for $5. Administrators have no limit. The status line shows them all, for example "Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought", and is refreshed after each answer. Ctrl-B twice (or phaneris buy) records a request for 100 questions; until online payment opens, an administrator adds them.
+
+Keys: Ctrl-G whole graph on or off, Ctrl-B buy 100 questions, Ctrl-K or / the bar, Ctrl-N a new pane, F6 the next pane, Ctrl-W close the tab, ? help, ? TOPIC this guide, Ctrl-Q leave. See: phaneris guide tui.
+""",
+    ),
+    (
         "start",
         "Getting started",
         """
-The Phaneris command line lets you use Phaneris from a terminal with your own account: your office's disclosures and reports with every score marked Real or Inferred, scoring new disclosures, questions, lookups in the knowledge graph around your disclosures, watchlists and score history. It shows exactly what the console shows your account; it adds no access of its own.
+The Phaneris command line lets you use Phaneris from a terminal with your own account: your office's disclosures and reports with every score marked Real or Inferred, scoring new disclosures, questions, lookups in the knowledge graph around your disclosures, and score history. It shows exactly what the console shows your account; it adds no access of its own.
 
 Install it with pipx (Python 3.10 or newer, no other dependencies), then sign in:
 
@@ -33,7 +70,7 @@ Install it with pipx (Python 3.10 or newer, no other dependencies), then sign in
 
 Most of the work is done with a subject and a function code: phaneris SUBJECT CODE. The subject is what you want to look at (a disclosure, a patent, a person, an owner, a class); the code is the screen (SCR for scores, WHY for what moves them). See: phaneris guide subjects.
 
-With no words on a terminal, phaneris opens the command bar (or full-screen mode, if its extra is installed). Every command takes --json for scripts.
+Type phaneris with no words and the Phaneris window opens: type any name, disclosure or question in its bar, and ask about a disclosure or the whole knowledge graph. See: phaneris guide window. (Without the window's extra, phaneris opens the line-mode command bar.) Every command takes --json for scripts.
 
 Topics: phaneris guide (the list), phaneris guide TOPIC, phaneris guide --search WORD. The website has the same guide: """
         + DOCS
@@ -71,12 +108,6 @@ Knowledge graph (Phaneron)
   graph search TEXT --disclosure ID    records around your disclosure that match
   graph record NODE --disclosure ID    one record and what it links to
   graph related NODE --disclosure ID   the records one step from it
-
-What changed
-  watch add SUBJECT     watch a disclosure, or a record around one (--disclosure ID); up to 200
-  watch remove SUBJECT  stop watching it
-  watch list            what you watch
-  feed [--all]          what changed since you last looked (--all: everything kept)
 
 Functions
   phaneris SUBJECT CODE   a screen, for example phaneris T-000003 SCR. See: phaneris guide subjects.
@@ -138,13 +169,11 @@ The codes:
   OWN    ownership and timeline, later items as hindsight    phaneris US 8916381 OWN
   CLS    patent class trends                                 phaneris A61K CLS
   HIST   score history: versions, what moved and why         phaneris T-000003 HIST
-  WATCH  watch it, or stop watching (a toggle)               phaneris T-000003 WATCH
-  NEWS   what changed in what you watch                      phaneris NEWS
   ASK    a conversation about it                             phaneris T-000003 ASK
   PORT   your office's board                                 phaneris PORT
   HELP   what applies to a subject                           phaneris T-000003 HELP
 
-DES, GRF, OWN, WATCH and NEWS apply to a disclosure or a record; SCR, WHY, CMP and HIST to a disclosure; CLS also to a class; PORT to your office.
+DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP and HIST to a disclosure; CLS also to a class; PORT to your office.
 """,
     ),
     (
@@ -174,8 +203,6 @@ CLS. Filings by year as a line, share in force and the top owners. The yearly co
 
 PORT. Your office's disclosures ranked by deal chance, with the recommendation, how many of the nine metrics are Real, and a heat row of the nine (in order ipd ms eq ia tf rp fto ta cp: darker is higher, green Real, amber Inferred). There is no board across offices yet, for any account.
 
-NEWS. What changed in what you watch, grouped by item, newest first; each item says which screen opens it. See: phaneris guide watch.
-
 HIST. Every kept version of a disclosure's score: when it was scored, the deal chance, the full estimate, the recommendation, where it came from (a data import or a re-score) and what moved. Under it, why the latest version moved: the change in each fitted input's push between the two latest versions, shown only when both were scored with the model the site holds.
 """,
     ),
@@ -183,7 +210,7 @@ HIST. Every kept version of a disclosure's score: when it was scored, the deal c
         "questions",
         "Questions and limits",
         """
-There are two kinds of question. The service decides every limit; the command line shows what it answers.
+There are two kinds of question. The service decides every limit; the command line shows what it answers. In the window, type a question in the bar (/kg or Ctrl-G for the whole graph; see phaneris guide window); on the command line, phaneris ask.
 
   About a disclosure (--disclosure ID)   that disclosure, its report and the records it connects to.
                                          10 free in any 12 hours.
@@ -194,28 +221,7 @@ There are two kinds of question. The service decides every limit; the command li
 
 A question the answer service could not answer does not count. phaneris usage shows what you have left. phaneris buy records a request for 100 more; until online payment opens, an administrator adds them and marks the request filled. Bought questions do not expire.
 
-Lookups (graph commands, DES, GRF, OWN, CLS on records, did-you-mean, adding a watch) reach only what your disclosure connects to: the disclosure, its patents and the records within two links of them, never another institution's disclosures. Office users and developers stay inside the named disclosure's neighbourhood. Administrators read every graph, whole, even when they name a disclosure, and may leave the disclosure out. Lookups are limited to 300 an hour per person, to keep the graph from being copied in bulk.
-""",
-    ),
-    (
-        "watch",
-        "Watchlists and the feed",
-        """
-Watch the disclosures and records you care about, and NEWS (phaneris feed) shows what changed since you last looked:
-  new or removed patents, assignments, licences, trials, grants and papers
-  a changed application status, grant date or owner
-  a score that moved: the deal chance, the recommendation, any metric by more than 0.05, or a metric turning Real
-  or Inferred
-
-  phaneris watch add T-000003
-  phaneris watch add "US 8916381" --disclosure T-000003
-  phaneris watch list
-  phaneris feed
-  phaneris feed --all
-
-You can watch your own disclosures and records within reach of one of them, up to 200 items; adding one counts as a lookup. Changes are found when new data is loaded and when a disclosure is scored again, and only for watched items. Reading the feed marks it as seen; --all shows everything kept and does not. The feed is checked against what you may see each time it is read: a change about a record that has left your reach does not name it, and a watched record that has left your reach stops showing. A re-score's numbers are shown only to the person who entered it.
-
-Each item says which screen opens it: a score move opens HIST, anything else the timeline (OWN), a class CLS. In full-screen mode, Enter on a NEWS line opens it, and w on a disclosure or record screen watches it. The console's Overview shows the same changes in a small "What changed" panel.
+Lookups (graph commands, DES, GRF, OWN, CLS on records, did-you-mean, opening a cited record) reach only what your disclosure connects to: the disclosure, its patents and the records within two links of them, never another institution's disclosures. Office users and developers stay inside the named disclosure's neighbourhood. Administrators read every graph, whole, even when they name a disclosure, and may leave the disclosure out. Lookups are limited to 300 an hour per person, to keep the graph from being copied in bulk.
 """,
     ),
     (
@@ -226,19 +232,20 @@ Several screens side by side, keyboard first. It needs one optional extra:
 
   pipx inject phaneris-cli textual
 
-Then phaneris tui (or phaneris tui T-000003 SCR); with the extra installed, phaneris with no words opens it too. The bar on top takes the same subjects and codes. With no saved layout it opens on NEWS.
+Then phaneris tui (or phaneris tui T-000003 SCR); with the extra installed, phaneris with no words opens it too. The bar on top takes the same subjects and codes, and questions (see phaneris guide window). With no saved layout it opens on the welcome pane. A layout saved before 0.7.0 that names NEWS or WATCH still opens; those tabs are skipped with a note.
 
   ctrl+k or /       the bar                    ctrl+n          a new pane (up to four)
   f6, ctrl+right    next pane                  shift+f6        previous pane
   [  ]              previous, next tab         ctrl+w          close the tab
   <  >              narrow, widen the pane     ctrl+x          close the pane
   ctrl+s            save this layout           ?  f1           help
-  w                 watch this pane's subject  ctrl+q          leave
+  ctrl+g            whole graph on or off      ctrl+b          buy 100 questions (press twice)
+  ctrl+q            leave
   :save NAME   :load NAME   :layouts   :theme amber|phaneris   :guide TOPIC   :quit
 
-In a map (GRF): arrows move, Enter re-centres (one lookup), Backspace goes back, d shows the record's brief beside it, o opens it in a tab. On the board (PORT): Enter opens the disclosure's scores. In NEWS: Enter opens what changed. :guide opens this guide in a pane.
+In a map (GRF): arrows move, Enter re-centres (one lookup), Backspace goes back, d shows the record's brief beside it, o opens it in a tab. On the board (PORT): Enter opens the disclosure's scores. In an answer: Enter opens a cited record, g its map. :guide opens this guide in a pane.
 
-Layouts are kept in ~/.config/phaneris/layouts.json (only you can read it); "default" opens by itself. After 30 minutes without a key the screen locks until a key is pressed; your password is never asked for or kept.
+Layouts are kept in ~/.config/phaneris/layouts.json (only you can read it); "default" opens by itself. After the service's idle limit (2 minutes) without a key, the window clears, the sign-in ends and you sign in again; see phaneris guide signin. The status line refreshes every minute without counting as activity.
 """,
     ),
     (
@@ -250,7 +257,7 @@ Themes: --theme phaneris (the default, a violet accent) or --theme amber (amber 
 Scripts: every command and code takes --json and prints machine-readable output; errors go to standard error as JSON with "error" and "next", and the exit status is not zero. With no terminal, nothing asks a question: a choice between records, or a did-you-mean list, is printed and the command stops.
 
   phaneris --json T-000003 SCR
-  phaneris --json feed --all
+  phaneris --json ask --graph "Who owns CAR-T patents?"
   PHANERIS_TOKEN=... phaneris --json disclosures     a sign-in from a secrets manager, kept out of files
 
 Settings: --server URL or PHANERIS_URL (default https://www.phaneris.co; https, or this computer for testing), PHANERIS_USERNAME, PHANERIS_TOKEN, PHANERIS_NO_KEYCHAIN=1 (keep the sign-in in the file even on macOS), PAGER (the pager for this guide).
@@ -276,7 +283,10 @@ Settings: --server URL or PHANERIS_URL (default https://www.phaneris.co; https, 
   300 knowledge graph lookups        The hourly limit; it frees up as the hour passes.
   the code expired                   Browser codes last 10 minutes: run phaneris login again.
   No exact match ... Did you mean    The name found nothing; pick one of the close matches, or use the id.
-  You are watching 200 items         Remove one with phaneris watch remove ID.
+  No disclosure open                 A question in the window needs an open disclosure, or /kg (Ctrl-G) for the
+                                     whole knowledge graph.
+  cannot be opened further           A cited record outside your disclosures' reach: its brief is shown; ask the
+                                     whole knowledge graph (/kg) for more.
 
 phaneris doctor checks Python, the server, your sign-in and where it is kept. To report a problem, use the contact form on the website with the command and the message it printed; never include your password or sign-in.
 """,
@@ -293,7 +303,7 @@ Everything is kept under ~/.config/phaneris (or $XDG_CONFIG_HOME/phaneris), read
 
 Your password is never kept. Questions typed into a conversation are kept only in memory while it is open. Reports and PDFs are saved only where you ask (--pdf FILE). phaneris history --clear empties the history; phaneris logout ends the sign-in and removes it from this computer.
 
-The service keeps what the console keeps for your account: your watchlist, the feed's last-seen time, score history, and a count of lookups and questions (not their text) for the limits.
+The service keeps what the console keeps for your account: score history, and a count of lookups and questions (not their text) for the limits.
 """,
     ),
 ]
@@ -310,9 +320,10 @@ ALIASES = {
     "real": "screens",
     "inferred": "screens",
     "limits": "questions",
-    "feed": "watch",
-    "news": "watch",
-    "watchlist": "watch",
+    "kg": "window",
+    "ask": "window",
+    "scope": "window",
+    "phaneris": "window",
     "keys": "tui",
     "full-screen": "tui",
     "json": "output",

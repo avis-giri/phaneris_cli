@@ -26,8 +26,6 @@ CODES = {
     "OWN": ("Ownership and timeline: filings, grant, assignments, licences, trials, papers; later items as hindsight", ("disclosure", "record")),
     "CLS": ("Patent class trends: filings by year, share in force, owners", ("disclosure", "record", "class")),
     "HIST": ("Score history: each version's deal chance and recommendation, what moved and why", ("disclosure",)),
-    "WATCH": ("Watch it, or stop watching (a toggle); with no subject, what you watch", ("disclosure", "record", "none")),
-    "NEWS": ("What changed in what you watch, since you last looked", ("disclosure", "record", "none")),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
@@ -36,6 +34,58 @@ CPC_RX = re.compile(r"^[A-HY]\d{2}[A-Z](\s?\d{1,4}/\d{1,6})?$", re.I)
 PATENT_RX = re.compile(r"^(?:US)?\s*([\d,]{6,13})$", re.I)
 RECORD_RX = re.compile(r"^(?:(?:author|inventor|pat|cpc|assignee|institution|domain|trial|grant|pub|topic|cohort):\S|T-\d)", re.I)
 STAGE_LABEL = {"out": "Going out", "licensed": "Licensed", "spinout": "Spin-out", "maintained": "Maintained", "inactive": "Inactive"}
+
+
+REMOVED_CODES = ("NEWS", "WATCH")  # the what-changed feed and its watchlists, removed in 0.7.0
+
+
+def question_of(line):
+    """(question, scope) when a bar line is a question, else None. A question ends with "?", or starts with "ask " or
+    "/ask "; "/kg QUESTION" and "ask --graph QUESTION" ask the whole knowledge graph (scope "graph"); otherwise the scope
+    is decided by what is open (None). "?" alone and "? TOPIC" are help, not questions."""
+    s = line.strip()
+    low = s.lower()
+    if low.startswith("/kg "):
+        return s[4:].strip(), "graph"
+    for prefix in ("/ask ", "ask "):
+        if low.startswith(prefix):
+            q = s[len(prefix) :].strip()
+            if q.lower().startswith("--graph "):
+                return q[8:].strip(), "graph"
+            return (q, None) if q else None
+    if s.endswith("?") and not s.startswith("?") and len(s) > 2:
+        return s, None
+    return None
+
+
+def allowance(q, graph=False):
+    """One allowance in a few words: "4 of 5 whole graph", "8 of 10 free about disclosures"."""
+    if not q:
+        return ""
+    if q.get("unlimited"):
+        return "no limit"
+    return f"{q.get('free_left', 0)} of {q.get('limit', 0)} " + ("whole graph" if graph else "free about disclosures")
+
+
+def allowances_line(usage):
+    """The status line's questions: "Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought"."""
+    q, g = (usage or {}).get("quota") or {}, (usage or {}).get("graph_quota") or {}
+    if q.get("unlimited"):
+        return "Questions: no limit"
+    return f"Questions: {allowance(q)}, {allowance(g, graph=True)}, {q.get('credits', 0)} bought"
+
+
+def ask_offer(ctx, name):
+    """The first suggestion for a name out of reach (non-admins): ask the whole knowledge graph about it. Never sent
+    without the person choosing it."""
+    try:
+        g = ctx.api.get("/explore/usage").get("graph_quota") or {}
+    except ApiError:
+        g = {}
+    left = g.get("free_left", 0)
+    bought = f", {g['credits']} bought" if g.get("credits") else ""
+    label = f"Ask the whole knowledge graph about '{name}' ({left} free whole-graph question{'s' if left != 1 else ''} left{bought})"
+    return {"id": f"Who or what is {name}?", "name": label, "kind": "ask"}
 
 
 def arg(ident):
@@ -237,23 +287,31 @@ def _interactive(ctx):
     return not ctx.out.as_json and getattr(ctx, "interactive", True) and sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _offer(ctx, text, found, what="match", example=None):
+def _offer(ctx, text, found, what="match", example=None, reason=None):
     """Show numbered close matches. On a terminal, return the one picked (Enter cancels); otherwise list them and stop
     with an error."""
     from .main import fail
 
-    lines = [f"{i}. {x['name']}" + ("" if x["kind"] == "code" else f" ({x['kind']}) {x['id']}") for i, x in enumerate(found, 1)]
-    head = f"No exact {what} for '{text}'. Did you mean:"
+    lines = [f"{i}. {x['name']}" + ("" if x["kind"] in ("code", "ask") else f" ({x['kind']}) {x['id']}") for i, x in enumerate(found, 1)]
+    head = f"{reason[0].rstrip('.')}. Instead:" if reason else f"No exact {what} for '{text}'. Did you mean:"
     if not _interactive(ctx):
         if ctx.out.as_json:
             ctx.out.data({"error": f"No exact {what} for '{text}'.", "suggestions": found})
         code = ctx.opts.get("_code") or "DES"
+        first = next((x for x in found if x["kind"] != "ask"), None)
+        if example is None and found[0]["kind"] == "ask":
+            example = f'a question instead: phaneris ask --graph "{found[0]["id"]}"'
+            if reason and reason[1]:
+                example = f"{reason[1][0].lower()}{reason[1][1:].rstrip('.')}; or {example}"
+            if first:
+                example += f", or the id: phaneris {arg(first['id'])} {code}"
         example = example or f"the id, for example: phaneris {arg(found[0]['id'])} {code}"
         if what == "code":
             subject = ctx.opts.get("_subject", "")
             choices = [(x["name"], f"{subject} {x['id']}".strip()) for x in found]
         else:
-            choices = [(f"{x['name']}  {x['kind']}  {x['id']}", _line(ctx, x["id"], code)) for x in found]
+            choices = [(x["name"], f":askkg {x['id']}") if x["kind"] == "ask" else (f"{x['name']}  {x['kind']}  {x['id']}", _line(ctx, x["id"], code))
+                       for x in found]  # fmt: skip
         raise Choose(head + " " + "  ".join(lines), "Run it with " + example, choices)
     ctx.p(ctx.s.bold(head))
     for line in lines:
@@ -275,11 +333,23 @@ def did_you_mean(ctx, text, otherwise=None):
     from .main import fail
 
     found = [x for x in suggestions(ctx, text) if x["kind"] != "code"]
+    where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
+    message, hint = otherwise or (f'nothing named "{text}" within reach{where}.', 'Try part of the name, or ask: phaneris ask "..."')
+    reason = None if found else (message[0].upper() + message[1:], hint)
+    if ctx.role != "admin":  # never a dead end: asking the whole graph comes first, sent only if chosen
+        found = [ask_offer(ctx, text), *found]
     if not found:
-        where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
-        message, hint = otherwise or (f'nothing named "{text}" within reach{where}.', 'Try part of the name, or ask: phaneris ask "..."')
         fail(message, hint)
-    x = _offer(ctx, text, found)
+    x = _offer(ctx, text, found, reason=reason)
+    if x["kind"] == "ask":
+        from .main import print_answer
+
+        res = ctx.api.post("/explore", {"question": x["id"], "history": [], "scope": {"kind": "graph"}})
+        if ctx.out.as_json:
+            ctx.out.data(res)
+        else:
+            print_answer(res, ctx.out, False)
+        return {"kind": "asked"}
     if x["kind"] == "disclosure":
         return resolve(ctx, x["id"])
     _recent(ctx, x["id"])
@@ -327,6 +397,9 @@ def run(ctx, tokens):
     subject_text, code, opts = parse(tokens)
     ctx.opts = opts
     words = subject_text.split()
+    if words and words[-1].upper() in REMOVED_CODES:
+        hint = "See what applies: phaneris HELP. Score history stays: phaneris T-000003 HIST"
+        fail(f"{words[-1].upper()} was removed in 0.7.0, with the what-changed feed.", hint)
     if opts.get("_default_code") and len(words) > 1 and re.fullmatch(r"[A-Z]{2,5}", words[-1]) and words[-1] not in CODES:
         near = close_codes(words[-1])
         if near:  # "T-000003 SRC": a mistyped code, not part of the name
@@ -344,6 +417,8 @@ def run(ctx, tokens):
         subject = {"kind": "class", "code": subject_text.upper(), "name": subject_text.upper()}
     else:
         subject = resolve(ctx, subject_text) if code != "PORT" else {"kind": "none"}
+    if subject["kind"] == "asked":  # the person chose to ask the whole knowledge graph instead; the answer is shown
+        return
     allowed = CODES[code][1]
     if subject["kind"] not in allowed:
         what = {"disclosure": "a disclosure", "record": "a knowledge graph record", "class": "a patent class", "none": "no subject"}[subject["kind"]]
@@ -868,7 +943,7 @@ def screen_cls(ctx, subject):
             ctx.p(s.dim(line))
 
 
-# ------------------------------------------------------------------ watching, what changed, score history
+# ------------------------------------------------------------------ score history
 
 
 def _quote(v):
@@ -959,133 +1034,11 @@ def screen_hist(ctx, subject):
                 was = f"{c['from']:+.2f} to {c['to']:+.2f}"
                 ctx.p(f"  {label.ljust(label_w)} {draw.diverging(s, c['change'], scale, bar_w)} {c['change']:+.2f}  {s.dim(was)}")
             ctx.p(s.dim(f"  In all {why['log_odds_change']:+.2f} log-odds. {why.get('note', '')}"))
-    ctx.p(s.dim(f"Next: {subject['id']} SCR · WHY · WATCH" if s.color else f"Next: {subject['id']} SCR, WHY, WATCH"))
+    ctx.p(s.dim(f"Next: {subject['id']} SCR · WHY" if s.color else f"Next: {subject['id']} SCR, WHY"))
 
 
 def _target(subject):
     return subject.get("id") or subject.get("node")
-
-
-def watch_toggle(ctx, subject, on=None):
-    """Watch or stop watching a subject; `on` None toggles. Returns (watching now, the server's answer)."""
-    target = _target(subject)
-    watching = {w["target"] for w in ctx.api.get("/watch").get("watches") or []}
-    if on is None:
-        on = target not in watching
-    if not on:
-        return False, ctx.api.post("/watch/remove", {"target": target})
-    body = {"target": target, "kind": subject["kind"]}
-    if subject["kind"] == "record" and ctx.context:
-        body["disclosure"] = ctx.context
-    return True, ctx.api.post("/watch", body)
-
-
-def screen_watch(ctx, subject):
-    s = ctx.s
-    if subject["kind"] == "none":
-        res = ctx.api.get("/watch")
-        if ctx.out.as_json:
-            return ctx.out.data(res)
-        rows = res.get("watches") or []
-        count = f"{len(rows)} of {res.get('limit', 200)}"
-        ctx.p(f"{s.accent('WATCH')}  {s.bold('What you watch')}  {s.dim(count)}")
-        ctx.p(s.rule())
-        if not rows:
-            ctx.p("Nothing yet. Watch a disclosure or a record: phaneris T-000003 WATCH")
-            return
-        for w in rows:
-            gone = "" if w.get("reachable", True) else s.warn("  no longer within reach")
-            around = f"  around {w['context']}" if w["kind"] == "record" and w.get("context") else ""
-            ctx.p(_fit(s, f"  {w['label'][:48]:<48} {s.dim(w['target'])}{s.dim(around)}{gone}"))
-        ctx.p(s.dim("Changes appear in NEWS (phaneris feed). Stop watching: phaneris ID WATCH --off"))
-        return
-    on = True if ctx.opts.get("on") else False if ctx.opts.get("off") else None
-    watching, res = watch_toggle(ctx, subject, on)
-    if ctx.out.as_json:
-        return ctx.out.data({"watching": watching, **res})
-    name = subject.get("name") or _target(subject)
-    if watching:
-        ctx.p(f"{s.good('Watching')} {name} {s.dim(_target(subject))}. Its changes appear in NEWS.")
-    else:
-        ctx.p(f"Stopped watching {name} {s.dim(_target(subject))}." if res.get("removed") else f"You were not watching {name}.")
-
-
-def open_line(item, event=None):
-    """The screen a feed line opens: a score move opens HIST; a disclosure's graph change, its timeline; a record's,
-    its timeline (a class: its trends), around the disclosure it is watched from."""
-    target = item["target"]
-    if item["kind"] == "disclosure":
-        return f"{arg(target)} {'HIST' if event and event['event'] == 'score moved' else 'OWN'}"
-    code = "CLS" if target.startswith("cpc:") else "OWN" if target.startswith("pat:") else "DES"
-    return f"{arg(target)} {code}" + (f" --disclosure {arg(item['context'])}" if item.get("context") else "")
-
-
-def event_text(s, e):
-    d = e.get("detail") or {}
-    if e["event"] == "score moved":
-        return "score moved: " + "; ".join(_move_text(m) for m in d.get("moves") or [])
-    if d.get("out_of_reach"):
-        return f"{e['event']} {s.dim('(a record outside your reach)')}"
-    if d.get("name") or d.get("record"):
-        return f"{e['event']}: {d.get('name') or d['record']} {s.dim(d.get('record') or '')}".rstrip()
-    if "conveyance" in d:
-        return f"{e['event']}: {d['conveyance']}" + (f" to {d['to']}" if d.get("to") else "") + (f", recorded {d['date']}" if d.get("date") else "")
-    if "field" in d:
-        return f"{e['event']}: {d.get('from') or 'none'} to {d.get('to') or 'none'}"
-    return e["event"]
-
-
-def feed(ctx, subject=None):
-    q = []
-    if subject is not None:
-        q += ["all=1", f"item={_quote(_target(subject))}"]
-    elif ctx.opts.get("all"):
-        q.append("all=1")
-    return ctx.api.get("/feed" + ("?" + "&".join(q) if q else ""))
-
-
-def screen_news(ctx, subject):
-    s = ctx.s
-    one = subject if subject["kind"] != "none" else None
-    res = feed(ctx, one)
-    marking = one is None and not res.get("all")
-    if ctx.out.as_json:
-        if marking:
-            ctx.api.post("/feed/seen", {})
-        return ctx.out.data(res)
-    since = res.get("since")
-    extra = "since you started watching"
-    if res.get("all"):
-        extra = "everything kept"
-    elif since:
-        extra = f"since you last looked, {since[:16].replace('T', ' ')}"
-    if one:
-        heading(ctx, subject, "NEWS", "everything kept")
-    else:
-        ctx.p(f"{s.accent('NEWS')}  {s.bold('What changed')}  {s.dim(extra)}")
-        ctx.p(s.rule())
-    items = res.get("items") or []
-    if not items:
-        watching = len(ctx.api.get("/watch").get("watches") or []) if not one else None
-        if watching == 0:
-            ctx.p("You watch nothing yet. Watch a disclosure or a record: phaneris T-000003 WATCH")
-        else:
-            ctx.p("Nothing new." + ("" if one or res.get("all") else s.dim("  Everything kept: phaneris feed --all")))
-    for item in items:
-        if not one:
-            ctx.p(_fit(s, f"{s.bold(item['label'][:60])}  {s.dim(item['target'])}  {s.dim('open: ' + open_line(item, item['events'][0]))}"))
-        for e in item["events"]:
-            when = e["at"][:10]
-            source = {"graph load": "", "re-score": "re-score", "new data import": "new data"}.get(e.get("source"), "")
-            ctx.p(f"  {s.dim(when)}  {event_text(s, e)}" + (f"  {s.dim(source)}" if source else ""))  # wraps, never cut
-        if not one:
-            ctx.p()
-    if res.get("hidden"):
-        ctx.p(s.dim(f"{res['hidden']} change{'s are' if res['hidden'] != 1 else ' is'} not shown: about items no longer within your reach."))
-    if marking:
-        ctx.api.post("/feed/seen", {})
-        if items:
-            ctx.p(s.dim("Marked as seen. Everything kept: phaneris feed --all"))
 
 
 SCREENS = {
@@ -1093,8 +1046,6 @@ SCREENS = {
     "OWN": screen_own,
     "CLS": screen_cls,
     "HIST": screen_hist,
-    "WATCH": screen_watch,
-    "NEWS": screen_news,
     "SCR": screen_scr,
     "WHY": screen_why,
     "CMP": screen_cmp,
@@ -1190,7 +1141,7 @@ def command_bar(ctx):
             continue
         if line in ("?", "help", "HELP"):
             screen_help(ctx, {"kind": "none"})
-            ctx.p(ctx.s.dim("Guide topics: ? start, ? subjects, ? screens, ? watch, ? signin ... (all: ? guide)"))
+            ctx.p(ctx.s.dim("Guide topics: ? window, ? subjects, ? screens, ? questions, ? signin ... (all: ? guide)"))
             continue
         if line.startswith("?") or line.lower() == "guide" or line.lower().startswith("guide "):
             from . import guide

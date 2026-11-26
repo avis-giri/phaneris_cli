@@ -27,6 +27,9 @@ NOT_MEASURED_SHOWN = 10
 HELP = """\
 Use Phaneris from a terminal with your own account.
 
+Type phaneris with no words to open the Phaneris window: type any name, disclosure or question in its bar; /kg or
+Ctrl-G asks the whole knowledge graph. See: phaneris guide window.
+
 Account
   login                 sign in with your username and password (or --browser to approve in the console)
   logout                end this sign-in
@@ -51,12 +54,6 @@ Questions
   usage                     questions you have left
   buy                       request 100 more questions ($5)
 
-What changed
-  watch add SUBJECT     watch a disclosure, or a record around one (--disclosure ID); up to 200
-  watch remove SUBJECT  stop watching it
-  watch list            what you watch
-  feed [--all]          what changed in what you watch since you last looked (--all: everything kept)
-
 Knowledge graph (Phaneron)
   graph search TEXT --disclosure ID    records around your disclosure that match
   graph record NODE --disclosure ID    one record and what it links to
@@ -69,8 +66,7 @@ Functions: phaneris <SUBJECT> <CODE>, or phaneris go "<SUBJECT> <CODE>"
   WHY   what moves the score    CMP   comparables and how far they got
   GRF   neighbourhood map       ASK   a conversation about it
   OWN   ownership and timeline  CLS   patent class trends
-  HIST  score history           NEWS  what changed in what you watch
-  WATCH watch it (a toggle)     PORT  my office's board
+  HIST  score history           PORT  my office's board
   HELP  what applies to a subject
   Examples: phaneris T-000003 SCR    phaneris "Carl H. June" GRF    phaneris PORT
 
@@ -906,8 +902,6 @@ SUBCOMMANDS = (
     "usage",
     "buy",
     "graph",
-    "watch",
-    "feed",
     "guide",
     "go",
 )
@@ -964,7 +958,7 @@ def show_guide(argv):
         word = " ".join(words[i + 1 :]).strip()
         words = words[:i]
         if not word:
-            Fail_and_exit(out, Fail("give a word to find.", "phaneris guide --search watch"))
+            Fail_and_exit(out, Fail("give a word to find.", "phaneris guide --search Inferred"))
     width = min(100, shutil.get_terminal_size((100, 24)).columns - 1)
     if word:
         lines, n = guide.search(word, width)
@@ -986,20 +980,6 @@ def show_guide(argv):
     guide.page(guide.render(slug, width) + [f"Topics: phaneris guide. On the website: {guide.DOCS}"])
 
 
-def watch_words(words):
-    """`phaneris watch add|remove|list` and `phaneris feed [--all]`, as the WATCH and NEWS functions."""
-    if words[0] == "feed":
-        return ["NEWS", *words[1:]]
-    sub, rest = (words[1] if len(words) > 1 else "list"), words[2:]
-    if sub == "list":
-        return ["WATCH", *rest]
-    if sub in ("add", "remove"):
-        if not [w for w in rest if not w.startswith("--")]:
-            raise Fail(f"name what to {'watch' if sub == 'add' else 'stop watching'}.", f"phaneris watch {sub} T-000003")
-        return [*rest, "WATCH", "--on" if sub == "add" else "--off"]
-    raise Fail(f'"{sub}" is not a watch command.', "phaneris watch add ID, phaneris watch remove ID, phaneris watch list")
-
-
 def run_functions(argv):
     """`phaneris <SUBJECT> <CODE>`, `phaneris go "<SUBJECT> <CODE>"`, or the command bar with no words."""
     import shlex
@@ -1013,10 +993,8 @@ def run_functions(argv):
     if words and words[0] == "tui":
         return open_tui(args, out, " ".join(words[1:]) or None)
     if words and words[0] in ("watch", "feed"):
-        try:
-            words = watch_words(words)
-        except Fail as f:
-            Fail_and_exit(out, f)
+        hint = "Score history stays: phaneris T-000003 HIST. See: phaneris guide"
+        Fail_and_exit(out, Fail(f"phaneris {words[0]} was removed in 0.7.0, with the what-changed feed.", hint))
     if not words:
         if sys.stdin.isatty() and sys.stdout.isatty() and not args.json:
             if tui_available():
@@ -1025,6 +1003,7 @@ def run_functions(argv):
                 ctx = term.Ctx(signed_in(args), out, args)
             except Fail as f:
                 Fail_and_exit(out, f)
+            ctx.p(ctx.s.dim("The Phaneris window needs one extra: pipx inject phaneris-cli textual   (this is the line-mode bar)"))
             return term.command_bar(ctx)
         print(HELP)
         return

@@ -155,23 +155,6 @@ MAP = {
 }
 
 
-FEED = {
-    "since": "2026-11-20T09:00:00+00:00",
-    "all": False,
-    "hidden": 1,
-    "events": 3,
-    "items": [
-        {"kind": "disclosure", "target": "T-1", "context": "T-1", "label": "Test one", "latest": "2026-11-25T10:00:00+00:00", "events": [
-            {"id": 3, "at": "2026-11-25T10:00:00+00:00", "event": "score moved", "graph": None, "source": "re-score",
-             "detail": {"moves": [{"what": "deal chance", "from": 0.05, "to": 0.08},
-                                  {"what": "recommendation", "from": "Review", "to": "Pursue"}]}}]},
-        {"kind": "record", "target": "pat:1", "context": "T-1", "label": "A patent", "latest": "2026-11-24T10:00:00+00:00", "events": [
-            {"id": 2, "at": "2026-11-24T10:00:00+00:00", "event": "new licence", "graph": "phaneron", "source": "graph load",
-             "detail": {"date": "2026-10-02", "conveyance": "exclusive license", "to": "A LICENSEE"}},
-            {"id": 1, "at": "2026-11-24T10:00:00+00:00", "event": "new patent", "graph": "phaneron", "source": "graph load",
-             "detail": {"record": None, "name": None, "group": "patents", "out_of_reach": True}}]},
-    ],
-}  # fmt: skip
 HISTORY = {
     "id": "T-1",
     "name": "Test one",
@@ -198,9 +181,8 @@ SUGGEST = {
 
 class Fake(BaseHTTPRequestHandler):
     log = []
-    watches = []
     background = []
-    seen = False
+    graph_left = 4
     approved = False
     role = "client"
     two_step = False  # the account has two-step sign-in on: password sign-in needs code 123456
@@ -255,17 +237,6 @@ class Fake(BaseHTTPRequestHandler):
             if "disclosure" not in q and Fake.role != "admin":  # like the server: only your disclosures and the codes
                 found = [x for x in found if x["kind"] in ("disclosure", "code")]
             return self._send(200, {"query": q["q"], "suggestions": found})
-        if url.path == "/api/watch":
-            return self._send(200, {"watches": Fake.watches, "limit": 200})
-        if url.path == "/api/feed":
-            feed = json.loads(json.dumps(FEED))
-            if q.get("item"):
-                feed["items"] = [i for i in feed["items"] if i["target"] == q["item"]]
-            if q.get("all"):
-                feed.update(all=True, since=None)
-            elif Fake.seen:
-                feed.update(items=[], hidden=0, events=0)
-            return self._send(200, feed)
         if url.path == "/api/disclosures/T-1/history":
             return self._send(200, {"history": HISTORY})
         if url.path == "/api/disclosures/T-1/timeline":
@@ -288,7 +259,12 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {**MAP, "center": {**MAP["center"], "id": q.get("node", "inv:a")}})
         if url.path == "/api/explore/usage":
             return self._send(
-                200, {"quota": Fake.quota, "graph_quota": {**Fake.quota, "kind": "graph", "limit": 5, "window_hours": None}, "pack_requested": False}
+                200,
+                {
+                    "quota": Fake.quota,
+                    "graph_quota": {**Fake.quota, "kind": "graph", "limit": 5, "window_hours": None, "free_left": Fake.graph_left},
+                    "pack_requested": False,
+                },  # fmt: skip
             )
         if url.path == "/api/reports/Phaneris_Report_T-1.pdf":
             return self._send(200, b"%PDF-1.4 test", "application/pdf")
@@ -369,24 +345,16 @@ class Fake(BaseHTTPRequestHandler):
         if self.path == "/api/explore":
             if body["scope"].get("kind") == "graph" and Fake.quota["remaining"] == 0:
                 return self._send(429, {"error": "You have used your 5 free questions.", "code": "question_limit"})
-            return self._send(200, {"answer": f"Answer to {body['question']} [graph:demo:T-1].", "quota": Fake.quota, "steps": [],
-                                    "entities": {"graph:demo:T-1": {"name": "Test one", "type": "asset"}}})  # fmt: skip
+            entities = {"graph:demo:T-1": {"name": "Test one", "type": "asset"}}
+            answer = f"Answer to {body['question']} [graph:demo:T-1]."
+            if body["scope"].get("kind") == "graph":  # also a record outside the person's reach
+                entities["graph:phaneron:pat:999999"] = {"name": "Far patent", "type": "patent", "assignee": "SOMEONE ELSE"}
+                answer += " [graph:phaneron:pat:999999]"
+            return self._send(200, {"answer": answer, "quota": Fake.quota, "steps": [], "entities": entities})
         if self.path in ("/api/explore/request-pack", "/api/cli/logout"):
             return self._send(200, {"ok": True})
         if self.path == "/api/intake":
             return self._send(201, {"job": "J-9"})
-        if self.path == "/api/watch":
-            w = {"kind": body.get("kind", "record"), "target": body["target"], "context": body.get("disclosure") or body["target"],
-                 "label": "Test one" if body["target"] == "T-1" else "A patent", "reachable": True}  # fmt: skip
-            Fake.watches = [x for x in Fake.watches if x["target"] != w["target"]] + [w]
-            return self._send(200, {"watch": {**w, "new": True}})
-        if self.path == "/api/watch/remove":
-            before = len(Fake.watches)
-            Fake.watches = [x for x in Fake.watches if x["target"] != body["target"]]
-            return self._send(200, {"removed": len(Fake.watches) < before})
-        if self.path == "/api/feed/seen":
-            Fake.seen = True
-            return self._send(200, {"seen_at": "2026-11-26T10:00:00+00:00"})
         self._send(404, {"error": "Not found."})
 
 
@@ -400,7 +368,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "TOKEN_FILE", str(tmp_path / "token.json"))
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.watches, Fake.seen = [], False, "client", DRIVERS, [], False
+    Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.graph_left = [], False, "client", DRIVERS, 4
     Fake.background, Fake.two_step, Fake.idle = [], False, False
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -945,46 +913,6 @@ def posts(path):
     return [x[2] for x in Fake.log if x[0] == "POST" and x[1] == path]
 
 
-def test_watch_add_list_remove(server, capsys, monkeypatch):
-    signed(server, capsys, monkeypatch)
-    assert "Watching Test one" in run(capsys, "watch", "add", "T-1")
-    assert posts("/api/watch")[-1] == {"target": "T-1", "kind": "disclosure"}
-    assert "Watching A patent" in run(capsys, "watch", "add", "pat:1", "--disclosure", "T-1")
-    assert posts("/api/watch")[-1] == {"target": "pat:1", "kind": "record", "disclosure": "T-1"}
-    out = run(capsys, "watch", "list")
-    assert "2 of 200" in out and "Test one" in out and "around T-1" in out
-    assert json.loads(run(capsys, "--json", "watch", "list"))["limit"] == 200
-    assert "Stopped watching" in run(capsys, "watch", "remove", "T-1")
-    assert "not a watch command" in failed(capsys, "watch", "sometimes", "T-1")
-    assert "name what to watch" in failed(capsys, "watch", "add")
-    assert "not within reach" in failed(capsys, "watch", "add", "pat:999999", "--disclosure", "T-1")
-
-
-def test_watch_code_toggles(server, capsys, monkeypatch):
-    signed(server, capsys, monkeypatch)
-    assert "Watching" in run(capsys, "T-1", "WATCH")
-    assert "Stopped watching" in run(capsys, "T-1", "WATCH")
-    assert "Nothing yet" in run(capsys, "WATCH")
-
-
-def test_feed_since_last_seen_then_marks_it(server, capsys, monkeypatch):
-    signed(server, capsys, monkeypatch)
-    run(capsys, "watch", "add", "T-1")
-    out = run(capsys, "feed")
-    assert "since you last looked, 2026-11-20 09:00" in out
-    assert out.index("Test one") < out.index("A patent")  # newest item first
-    assert "score moved: deal chance 5.0% to 8.0%; recommendation Review to Pursue" in out and "open: T-1 HIST" in out
-    assert "new licence: exclusive license to A LICENSEE, recorded 2026-10-02" in out and "open: pat:1 OWN --disclosure T-1" in out
-    assert "new patent (a record outside your reach)" in out and "1 change is not shown" in out and "Marked as seen" in out
-    assert len(posts("/api/feed/seen")) == 1
-    assert "Nothing new" in run(capsys, "feed")
-    assert "Test one" in run(capsys, "feed", "--all") and len(posts("/api/feed/seen")) == 2  # --all does not mark
-    one = run(capsys, "pat:1", "NEWS", "--disclosure", "T-1")
-    assert "new licence" in one and "score moved" not in one
-    assert [x for x in Fake.log if x[1] == "/api/feed"][-1][2] == {"all": "1", "item": "pat:1"}
-    assert json.loads(run(capsys, "--json", "feed", "--all"))["events"] == 3
-
-
 def test_hist_lists_versions_and_why(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     out = run(capsys, "T-1", "HIST")
@@ -1004,12 +932,11 @@ def test_hist_lists_versions_and_why(server, capsys, monkeypatch):
 
 
 @pytest.mark.parametrize("cols", [60, 120])
-def test_news_and_hist_fit_the_terminal(server, capsys, monkeypatch, cols):
+def test_hist_fits_the_terminal(server, capsys, monkeypatch, cols):
     signed(server, capsys, monkeypatch)
     monkeypatch.setenv("COLUMNS", str(cols))
-    for words in (("feed", "--all"), ("T-1", "HIST")):
-        out = run(capsys, *words)
-        assert max(len(line) for line in out.splitlines()) <= cols
+    out = run(capsys, "T-1", "HIST")
+    assert max(len(line) for line in out.splitlines()) <= cols
 
 
 def terminal(monkeypatch, *answers):
@@ -1024,32 +951,44 @@ def test_did_you_mean_lists_close_matches_without_a_terminal(server, capsys, mon
     signed(server, capsys, monkeypatch)
     run(capsys, "T-1", "DES")  # sets the disclosure the lookups are bounded to
     err = failed(capsys, "Ada Shard", "GRF")
-    assert "No exact match for 'Ada Shard'. Did you mean: 1. Ada Shared (person) inv:a  2. Ada Other (person) inv:z" in err
-    assert "ask" not in err and "phaneris inv:a GRF" in err  # the same code, on the match
+    assert ("No exact match for 'Ada Shard'. Did you mean: 1. Ask the whole knowledge graph about 'Ada Shard' (4 free whole-graph "
+            "questions left)  2. Ada Shared (person) inv:a  3. Ada Other (person) inv:z") in err  # fmt: skip
+    assert 'phaneris ask --graph "Who or what is Ada Shard?", or the id: phaneris inv:a GRF' in err
+    assert not posts("/api/explore")  # listed, never sent without the person choosing it
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Ada Shard", "disclosure": "T-1"}
     with pytest.raises(SystemExit) as e:
         cli.main(["--json", "Ada Shard", "GRF"])
-    assert e.value.code != 0 and json.loads(capsys.readouterr().out)["suggestions"][0]["id"] == "inv:a"
+    found = json.loads(capsys.readouterr().out)["suggestions"]
+    assert e.value.code != 0 and found[0]["kind"] == "ask" and found[1]["id"] == "inv:a"
     assert "No exact match for 'US 456788'" in failed(capsys, "US 456788", "DES")  # a patent number a digit off
-    err = failed(capsys, "Nobody Atall", "GRF")  # nothing close: only then a question is suggested
-    assert "nothing named" in err and "phaneris ask" in err
+    err = failed(capsys, "Nobody Atall", "GRF")  # nothing close: asking the whole graph is the one suggestion
+    assert 'Nothing named "Nobody Atall" within reach around T-1. Instead: 1. Ask the whole knowledge graph about' in err
+    assert 'phaneris ask --graph "Who or what is Nobody Atall?"' in err
+    cli.remember(role="admin")  # admins reach the whole graph already: nothing close is the plain error
+    Fake.role = "admin"
+    assert "nothing named" in failed(capsys, "Nobody Atall", "GRF")
 
 
 def test_did_you_mean_picks_on_a_terminal(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     run(capsys, "T-1", "DES")
-    terminal(monkeypatch, "1")
+    terminal(monkeypatch, "2")
     out = run(capsys, "Ada Shard", "GRF")
-    assert "Did you mean:" in out and "1. Ada Shared (person) inv:a" in out
+    assert "Did you mean:" in out and "2. Ada Shared (person) inv:a" in out and not posts("/api/explore")
     assert [x[2]["node"] for x in Fake.log if x[1] == "/api/graph/map"][-1] == "inv:a"  # the same code, on the pick
-    terminal(monkeypatch, "1")
+    terminal(monkeypatch, "2")
     assert "Deal stages" in run(capsys, "Tset one", "SCR")  # a disclosure's name
+    terminal(monkeypatch, "1")  # the person chooses to ask the whole graph: only now is a question sent
+    out = run(capsys, "Nobody Atall", "GRF")
+    assert posts("/api/explore")[-1] == {"question": "Who or what is Nobody Atall?", "history": [], "scope": {"kind": "graph"}}
+    assert "Answer to Who or what is Nobody Atall?" in out
     terminal(monkeypatch, "")
     assert "cancelled" in failed(capsys, "Ada Shard", "GRF")
     terminal(monkeypatch)  # the input ends (Ctrl-D): cancelled, no traceback
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError))
     assert "cancelled" in failed(capsys, "Ada Shard", "GRF")
     assert "nothing chosen" in failed(capsys, "Ada", "DES")
+    assert not [p for p in posts("/api/explore") if p["question"] != "Who or what is Nobody Atall?"]
 
 
 def test_a_mistyped_code_suggests_the_code(server, capsys, monkeypatch):
@@ -1065,9 +1004,10 @@ def test_a_mistyped_code_suggests_the_code(server, capsys, monkeypatch):
 def test_no_disclosure_open_still_suggests_disclosures(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     err = failed(capsys, "Tset one", "SCR")
-    assert "1. Test one (disclosure) T-1" in err
+    assert "2. Test one (disclosure) T-1" in err
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Tset one"}
-    assert "Open one first" in failed(capsys, "Ada Shard", "GRF")  # no close disclosure: the plain advice
+    err = failed(capsys, "Ada Shard", "GRF")  # no close disclosure: asking the whole graph is offered, nothing sent
+    assert "1. Ask the whole knowledge graph about 'Ada Shard'" in err and not posts("/api/explore")
 
 
 def test_record_ids_with_spaces_open_and_are_quoted(server, capsys, monkeypatch):
@@ -1087,3 +1027,41 @@ def test_record_ids_with_spaces_open_and_are_quoted(server, capsys, monkeypatch)
     ctx.opts = {}
     term.resolve(ctx, "author:ETHAN STANCLIFFE")
     assert ctx.recent[0] == '"author:ETHAN STANCLIFFE"'  # Tab offers it the way the bar takes it
+
+
+def test_questions_are_recognised():
+    from phaneris_cli import term
+
+    assert term.question_of("Who invented it?") == ("Who invented it?", None)
+    assert term.question_of("ask who owns it") == ("who owns it", None) and term.question_of("/ask who owns it") == ("who owns it", None)
+    assert term.question_of("/kg What is CAR-T?") == ("What is CAR-T?", "graph")
+    assert term.question_of("ask --graph What is CAR-T") == ("What is CAR-T", "graph")
+    for not_one in ("?", "? watch", "T-1 SCR", "Carl H. June GRF", "ask", ":guide"):
+        assert term.question_of(not_one) is None, not_one
+
+
+def test_allowances_line():
+    from phaneris_cli import term
+
+    usage = {"quota": {"free_left": 8, "limit": 10, "credits": 0}, "graph_quota": {"free_left": 4, "limit": 5, "credits": 0}}
+    assert term.allowances_line(usage) == "Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought"
+    assert term.allowances_line({"quota": {"unlimited": True}, "graph_quota": {"unlimited": True}}) == "Questions: no limit"
+
+
+def test_news_watch_and_feed_were_removed(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    for words in (("T-1", "WATCH"), ("NEWS",), ("feed",), ("watch", "add", "T-1")):
+        assert "removed in 0.7.0" in failed(capsys, *words), words
+    assert "WATCH" not in run(capsys, "HELP") and "NEWS" not in run(capsys, "HELP")
+
+
+def test_no_words_without_the_window_opens_the_bar_with_a_hint(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setattr(cli, "tui_available", lambda: False)
+    monkeypatch.setattr("sys.stdin", TTY())
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+    from phaneris_cli import term
+
+    monkeypatch.setattr(term, "_reader", lambda ctx: lambda prompt="": (_ for _ in ()).throw(EOFError))
+    out = run(capsys)
+    assert "The Phaneris window needs one extra: pipx inject phaneris-cli textual" in out and "command bar" in out

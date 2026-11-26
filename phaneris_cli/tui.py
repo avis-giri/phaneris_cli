@@ -2,7 +2,7 @@
 
 A command bar on top (the same grammar, with Tab suggestions from your own history), up to four panes with tabs, a
 status line, a help overlay, two themes, an idle lock, and saved layouts. Every pane shows one screen (DES, SCR, WHY,
-CMP, OWN, CLS, HIST, NEWS, GRF, PORT, ASK) drawn for the pane's width from the same server routes as the command line, under the
+CMP, OWN, CLS, HIST, GRF, PORT, ASK) drawn for the pane's width from the same server routes as the command line, under the
 same bounds and limits. Needs Textual: `pipx inject phaneris-cli textual`.
 """
 
@@ -12,6 +12,7 @@ import re
 import shlex
 import stat
 import time
+from urllib.parse import quote
 
 from rich.text import Text
 from textual import events, work
@@ -92,7 +93,6 @@ class ScreenView(VerticalScroll):
     """One function screen, drawn for this pane's width. Reads once; re-drawing at a new width reads nothing again."""
 
     DEFAULT_CSS = "ScreenView { padding: 0 1; }"
-    BINDINGS = [Binding("w", "watch", "Watch")]
 
     def __init__(self, line, **kw):
         super().__init__(**kw)
@@ -131,27 +131,6 @@ class ScreenView(VerticalScroll):
             event.stop()
             self.app.open_tab(self.choices[int(event.option.id)][1])
 
-    @work(thread=True, group="watch")
-    def action_watch(self):
-        """w: watch this pane's disclosure or record, or stop watching it. Its changes appear in NEWS."""
-        subject_text, code, opts = term.parse(shlex.split(self.line))
-        ctx = self.app.ctx()
-        if opts.get("disclosure"):
-            ctx.context = opts["disclosure"]
-        try:
-            if not subject_text or code in ("PORT", "NEWS", "WATCH"):
-                raise term_fail()("this pane has no disclosure or record to watch.")
-            subject = term.resolve(ctx, subject_text)
-            if subject["kind"] not in ("disclosure", "record"):
-                raise term_fail()("only a disclosure or a record can be watched.")
-            watching, _ = term.watch_toggle(ctx, subject)
-            name = subject.get("name") or subject_text
-            self.app.call_from_thread(self.app.notify, f"Watching {name}." if watching else f"Stopped watching {name}.")
-        except ApiError as e:
-            self.app.call_from_thread(self.app.notify, e.message, severity="error")
-        except term_fail() as f:
-            self.app.call_from_thread(self.app.notify, f.message, severity="warning")
-
 
 class GuideView(VerticalScroll):
     """A topic of the guide shipped with this version (phaneris guide), or its list of topics. Reads nothing."""
@@ -180,63 +159,6 @@ class GuideView(VerticalScroll):
         if self.topic and not slug:
             lines = [f'No topic "{self.topic}". The topics:', ""] + lines
         self.query_one(".body", Static).update(Text("\n".join(lines)))
-
-
-class NewsView(Vertical):
-    """NEWS as a table, newest first: Enter on a line opens its screen (a score move its history, a change its timeline)
-    in a new tab. Showing it marks the feed as seen, as `phaneris feed` does."""
-
-    def __init__(self, line, **kw):
-        super().__init__(**kw)
-        self.line, self.lines = line, {}
-
-    def compose(self) -> ComposeResult:
-        yield Static("", classes="title")
-        yield DataTable(cursor_type="row", zebra_stripes=True)
-
-    def on_mount(self):
-        self.query_one(DataTable).add_columns("When", "Item", "What changed")
-        self.load()
-
-    @work(thread=True)
-    def load(self):
-        ctx = self.app.ctx()
-        ctx.opts = term.parse(shlex.split(self.line))[2]
-        try:
-            res = term.feed(ctx)
-            if not res.get("all"):
-                self.app.api.post("/feed/seen", {})
-        except ApiError as e:
-            self.app.call_from_thread(self.app.notify, e.message, severity="error")
-            return
-        self.app.call_from_thread(self._fill, res)
-
-    def _fill(self, res):
-        s = Style(color=True, theme=self.app.theme_name, truecolor=True)
-        since = res.get("since")
-        extra = "since you started watching"
-        if res.get("all"):
-            extra = "everything kept"
-        elif since:
-            extra = f"since you last looked, {since[:16].replace('T', ' ')}"
-        events = sum(len(i["events"]) for i in res.get("items") or [])
-        note = f"{events} change{'s' if events != 1 else ''}" if events else "nothing new"
-        if res.get("hidden"):
-            note += f", {res['hidden']} not shown (no longer within reach)"
-        self.query_one(".title", Static).update(Text.from_ansi(f"{s.accent('NEWS')}  {s.bold('What changed')}  {s.dim(extra + ', ' + note)}"))
-        table = self.query_one(DataTable)
-        rows = [(e, item) for item in res.get("items") or [] for e in item["events"]]
-        rows.sort(key=lambda r: r[0]["at"], reverse=True)
-        for e, item in rows:
-            key = str(e["id"])
-            self.lines[key] = term.open_line(item, e)
-            what = Text.from_ansi(term.event_text(s, e))
-            table.add_row(e["at"][:10], f"{item['label'][:32]}  {item['target']}", what, key=key)
-
-    def on_data_table_row_selected(self, event):
-        line = self.lines.get(event.row_key.value)
-        if line:
-            self.app.open_tab(line)
 
 
 class BoardView(Vertical):
@@ -293,6 +215,41 @@ class BoardView(Vertical):
         self.app.open_tab(f"{event.row_key.value} SCR")
 
 
+WELCOME = """\
+[b]The Phaneris window[/b]   type in the bar above, then Enter.
+
+  [b]Open anything[/b]   a disclosure id or title, a person, an owner, a patent or a class, then a code
+                  T-000003 SCR    "Carl H. June" GRF    US 8916381 OWN    A61K CLS    (no code: DES)
+  [b]Ask[/b]             a question ending in ?, or ask ...    about the disclosure that is open
+                  /kg QUESTION or Ctrl-G                 across the whole knowledge graph
+                  the chip beside the bar shows which one Enter will use, before anything is sent
+  [b]Tab[/b] completes from what you ran before    [b]?[/b] help    [b]? TOPIC[/b] the guide    [b]Ctrl-B[/b] buy 100 questions ($5)
+"""
+
+
+class WelcomeView(BoardView):
+    """The window's first pane: what to type, the person's disclosures (PORT, Enter opens one) and their question
+    allowances."""
+
+    def compose(self) -> ComposeResult:
+        yield Static(WELCOME, classes="intro")
+        yield Static("", classes="allowances")
+        yield Static("", classes="title")
+        yield DataTable(cursor_type="row", zebra_stripes=True)
+
+    def on_mount(self):  # Textual also runs BoardView.on_mount (the table and the board)
+        self.allowances()
+
+    @work(thread=True)
+    def allowances(self):
+        try:
+            usage = self.app.api.get("/explore/usage")
+        except ApiError:
+            return
+        line = "  " + term.allowances_line(usage) + ".  Buying more: Ctrl-B or phaneris buy."
+        self.app.call_from_thread(self.query_one(".allowances", Static).update, line)
+
+
 class Walker(Horizontal):
     """GRF you can walk: arrows move between records, Enter re-centres on one (one more lookup), Backspace goes back,
     d shows the record's brief beside the map, o opens it in a new tab."""
@@ -322,9 +279,15 @@ class Walker(Horizontal):
     @work(thread=True)
     def start(self):
         ctx = self.app.ctx()
-        subject_text, _, _ = term.parse(shlex.split(self.line))
+        subject_text, _, opts = term.parse(shlex.split(self.line))
+        ctx.opts = {"_code": "GRF"}
+        if opts.get("disclosure"):
+            ctx.context = opts["disclosure"]
         try:
             subject = term.resolve(ctx, subject_text)
+        except term.Choose as c:  # several matches, or none: rows to choose from, as on any screen
+            self.app.call_from_thread(self._choices, c)
+            return
         except term_fail() as f:
             self.app.call_from_thread(self.app.notify, f.message, severity="error")
             return
@@ -384,7 +347,18 @@ class Walker(Horizontal):
         opt = ol.get_option_at_index(ol.highlighted)
         return self.center if opt.id == "center" else (opt.id or "").split("|", 1)[-1] or None
 
+    def _choices(self, c):
+        self.choices = c.choices
+        for child in list(self.children):
+            child.remove()
+        box = OptionList(*[Option(label, id=str(i)) for i, (label, _) in enumerate(c.choices)], id="choices")
+        self.mount(Vertical(Static(Text(c.message.split(":")[0] + ":  Enter opens one in a new tab.", style="bold")), box))
+        box.focus()
+
     def on_option_list_option_selected(self, event):
+        if event.option_list.id == "choices":
+            event.stop()
+            return self.app.open_tab(self.choices[int(event.option.id)][1])
         node = self._selected()
         if node and node != self.center:
             self.run_worker(lambda: self._go(node), thread=True)
@@ -424,45 +398,71 @@ class Walker(Horizontal):
 
 
 class AskView(Vertical):
-    """A conversation about the subject: keeps the earlier questions, shows the records cited and the questions left.
-    The questions are not written to the history file."""
+    """A conversation in one scope: about a disclosure, or across the whole knowledge graph (metered). It keeps the
+    earlier questions of this scope, shows the records each answer cites as rows (Enter opens DES, g opens GRF) and the
+    questions left. Questions are never written to the history file."""
 
-    DEFAULT_CSS = "AskView RichLog { height: 1fr; } AskView Input { dock: bottom; }"
+    DEFAULT_CSS = """
+    AskView RichLog { height: 1fr; }
+    AskView #cited { height: auto; max-height: 8; display: none; }
+    AskView #cited.-show { display: block; }
+    AskView Input { dock: bottom; }
+    """
+    BINDINGS = [Binding("g", "graph_map", "Open the map", show=False)]
 
-    def __init__(self, line, **kw):
+    def __init__(self, line, scope=None, first=None, **kw):
         super().__init__(**kw)
-        self.line, self.scope, self.turns = line, None, []
+        self.line, self.scope, self.turns, self.first = line, scope, [], first
+        self.cites, self.briefs = [], {}
 
     def compose(self) -> ComposeResult:
         yield RichLog(wrap=True, markup=False)
-        yield Input(placeholder="Ask a question, then Enter")
+        yield OptionList(id="cited")
+        yield Input(placeholder="Ask a follow-up, then Enter")
 
     def on_mount(self):
-        self.prepare()
+        if self.scope:
+            self._started()
+        else:
+            self.prepare()
+
+    def about(self):
+        return "the whole knowledge graph" if self.scope["kind"] == "graph" else f"disclosure {self.scope['disclosure']}"
+
+    def _started(self):
+        note = "metered: free ones first, then bought" if self.scope["kind"] == "graph" else "what it connects to"
+        self.query_one(RichLog).write(Text(f"Asking about {self.about()} ({note}).", style="bold"))
+        if self.first:
+            self.send(self.first)
+            self.first = None
 
     @work(thread=True)
     def prepare(self):
+        """A conversation opened by a line (T-000003 ASK, ASK --graph): its scope from the subject."""
         ctx = self.app.ctx()
         subject_text, _, opts = term.parse(shlex.split(self.line))
-        try:
-            subject = term.resolve(ctx, subject_text)
-        except (term_fail(), ApiError) as e:
-            self.app.call_from_thread(self.app.notify, getattr(e, "message", str(e)), severity="error")
-            return
-        if subject["kind"] == "disclosure":
-            self.scope, about = {"kind": "disclosure", "disclosure": subject["id"]}, subject["name"]
-        elif ctx.context and not opts.get("graph"):
-            self.scope, about = {"kind": "disclosure", "disclosure": ctx.context}, f"{subject.get('name')}, around {ctx.context}"
+        if opts.get("graph"):
+            self.scope = {"kind": "graph"}
         else:
-            self.scope, about = {"kind": "graph"}, "the whole knowledge graph (metered)"
-        self.app.call_from_thread(self.query_one(RichLog).write, Text(f"Asking about {about}.", style="bold"))
+            try:
+                subject = term.resolve(ctx, subject_text)
+            except (term_fail(), ApiError) as e:
+                self.app.call_from_thread(self.app.notify, getattr(e, "message", str(e)), severity="error")
+                return
+            d = subject["id"] if subject["kind"] == "disclosure" else ctx.context
+            self.scope = {"kind": "disclosure", "disclosure": d} if d else {"kind": "graph"}
+        self.app.call_from_thread(self._started)
 
     def on_input_submitted(self, event):
+        event.stop()
         q = event.value.strip()
         event.input.value = ""
         if q and self.scope:
-            self.query_one(RichLog).write(Text("› " + q, style="bold"))
-            self.ask(q)
+            self.send(q)
+
+    def send(self, q):
+        self.query_one(RichLog).write(Text("› " + q, style="bold"))
+        self.ask(q)
 
     @work(thread=True)
     def ask(self, q):
@@ -473,16 +473,70 @@ class AskView(Vertical):
             res = self.app.api.post("/explore", {"question": q, "history": self.turns[-12:], "scope": self.scope})
         except ApiError as e:
             self.app.call_from_thread(log.write, Text(e.message, style="red"))
+            if e.code in ("question_limit", "graph_limit") or e.status == 429:
+                self.app.call_from_thread(log.write, Text("Buy 100 more questions for $5: Ctrl-B, or phaneris buy.", style="dim"))
             return
         self.turns += [{"role": "user", "content": q}, {"role": "assistant", "content": res.get("answer", "")}]
-        lines = [Text(strip_cites(res.get("answer", "")))]
+        self.app.call_from_thread(log.write, Text(strip_cites(res.get("answer", ""))))
         refs = cited(res)
+        self.briefs.update(res.get("entities") or {})
         if refs:
-            lines.append(Text("Records cited: " + "; ".join(f"{c['name']} ({c['cite']})" for c in refs[:6]), style="dim"))
-        lines.append(Text(quota_line(res.get("quota")), style="dim"))
-        for t in lines:
-            self.app.call_from_thread(log.write, t)
+            self.app.call_from_thread(log.write, Text("Records cited, below: Enter opens one (DES), g its map (GRF).", style="dim"))
+        self.app.call_from_thread(log.write, Text(quota_line(res.get("quota")), style="dim"))
+        self.app.call_from_thread(self._cited, refs)
         self.app.call_from_thread(self.app.refresh_status)
+
+    def _cited(self, refs):
+        box = self.query_one("#cited", OptionList)
+        for r in refs:
+            if r["cite"] not in self.cites:
+                self.cites.append(r["cite"])
+                box.add_option(Option(f"{r['name']}  {r['type']}  {node_of(r['cite'])}", id=r["cite"]))
+        box.set_class(bool(self.cites), "-show")
+
+    def on_option_list_option_selected(self, event):
+        if event.option_list.id == "cited":
+            event.stop()
+            self.open_cited(event.option.id, "DES")
+
+    def action_graph_map(self):
+        box = self.query_one("#cited", OptionList)
+        if box.has_focus and box.highlighted is not None:
+            self.open_cited(box.get_option_at_index(box.highlighted).id, "GRF")
+
+    @work(thread=True)
+    def open_cited(self, cite, code):
+        """Open a cited record. Admins reach every record; everyone else only within reach of one of their disclosures,
+        so it is checked first (one lookup); otherwise the brief the answer returned is shown, and why."""
+        node = node_of(cite)
+        ctx = self.app.ctx()
+        around = self.scope.get("disclosure") or ctx.context
+        if ctx.role != "admin":
+            if not around:
+                return self.app.call_from_thread(self._outside, cite, "no disclosure is open to look it up around")
+            try:
+                self.app.api.get(f"/graph/record?node={quote(node, safe='')}&disclosure={quote(around, safe='')}")
+            except ApiError as e:
+                if e.status in (400, 404):
+                    return self.app.call_from_thread(self._outside, cite, f"it is outside the reach of {around}")
+                return self.app.call_from_thread(self.app.notify, e.message, severity="error")
+        ctx.context = around
+        self.app.call_from_thread(self.app.open_tab, term._line(ctx, node, code))
+
+    def _outside(self, cite, why):
+        b = self.briefs.get(cite) or {}
+        log = self.query_one(RichLog)
+        log.write(Text(f"{b.get('name') or node_of(cite)}  {b.get('type', '')}  {node_of(cite)}", style="bold"))
+        for k, v in b.items():
+            if k not in ("name", "type", "id", "cite") and isinstance(v, (str, int, float)) and str(v).strip():
+                log.write(Text(f"  {k.replace('_', ' ')}: {str(v)[:200]}"))
+        log.write(Text(f"This is what the answer returned. It cannot be opened further: {why}. Lookups reach what your "
+                       "disclosures connect to; ask the whole knowledge graph (/kg) for more.", style="dim"))  # fmt: skip
+
+
+def node_of(cite):
+    """The record id in a cite: graph:phaneron:author:ETHAN STANCLIFFE gives author:ETHAN STANCLIFFE."""
+    return cite.split(":", 2)[2] if cite.count(":") >= 2 else cite
 
 
 def term_fail():
@@ -528,12 +582,10 @@ HELP_TEXT = """\
 [b]In a map (GRF)[/b]   arrows move, Enter re-centres (one lookup), Backspace goes back,
   d shows the record's brief beside it, o opens it in a new tab.
 [b]On the board (PORT)[/b]   Enter opens the disclosure's scores.
-[b]In NEWS[/b]   Enter opens what changed: a score move its history, anything else its timeline.
-[b]On a disclosure or record[/b]   w watches it, or stops watching it.
 
 Codes: DES what it is · SCR scores · WHY what moves the score · CMP comparables · OWN timeline
        CLS class trends · GRF neighbourhood map · ASK a conversation · PORT office board
-       HIST score history · WATCH watch it · NEWS what changed in what you watch
+       HIST score history
 
 Press any key to close."""
 
@@ -577,7 +629,12 @@ class PhanerisApp(App):
     TITLE = "phaneris"
     CSS = """
     Screen { layout: vertical; }
-    #bar { margin: 0 1; }
+    #barrow { height: auto; }
+    #bar { margin: 0 0 0 1; width: 1fr; }
+    #scope { width: auto; height: 3; padding: 1 1; margin: 0 1 0 0; background: $panel; color: $text; }
+    #scope.-graph { background: $accent; color: $text; }
+    WelcomeView .intro { padding: 0 1; }
+    WelcomeView .allowances { padding: 0 1 1 1; color: $text-muted; }
     #suggest { display: none; height: auto; max-height: 12; margin: 0 1; }
     #suggest.-show { display: block; }
     #panes { grid-size: 1 1; grid-gutter: 0 1; height: 1fr; }
@@ -603,6 +660,8 @@ class PhanerisApp(App):
         Binding("question_mark", "help", "Help"),
         Binding("f1", "help", show=False),
         Binding("ctrl+s", "save_layout", "Save layout", priority=True),
+        Binding("ctrl+g", "whole_graph", "Whole graph", priority=True),
+        Binding("ctrl+b", "buy", "Buy questions", priority=True),
         Binding("ctrl+q", "quit", "Leave", priority=True),
         Binding("escape", "hide_suggestions", show=False),
     ]
@@ -619,12 +678,19 @@ class PhanerisApp(App):
         self.recent = []
         self.tab_lines = {}
         self._tab_n = 0
+        self.graph_mode = False  # Ctrl-G: questions go to the whole knowledge graph
+        self.ask_tabs = {}  # one conversation per scope: "graph" or "disclosure:ID" -> tab id
+        self.disclosure_ids = {}  # the office's disclosures, id or lower-case name -> id, for the scope chip
+        self.buy_armed = 0.0
         self.is_locked = False
 
     # ---------------------------------------------------------------- building blocks
 
     def compose(self) -> ComposeResult:
-        yield CommandBar(placeholder="Subject and code, then Enter.  T-000003 SCR   ? help", id="bar", suggester=HistorySuggester(self))
+        with Horizontal(id="barrow"):
+            yield CommandBar(placeholder="A name, disclosure or question, then Enter.  T-000003 SCR   Who invented it?   ? help",
+                             id="bar", suggester=HistorySuggester(self))  # fmt: skip
+            yield Static("", id="scope")
         yield OptionList(id="suggest")
         yield Grid(Pane(), id="panes")
         yield Static("", id="status")
@@ -642,8 +708,10 @@ class PhanerisApp(App):
             self.open_tab(self.start_line)
         elif "default" in read_layouts():
             self.load_layout("default", quiet=True)
-        else:  # the default layout: what changed in what you watch
-            self.open_tab("NEWS")
+        else:  # the default layout: the welcome pane, with the office's disclosures and the allowances
+            self.open_tab(":welcome")
+        self.load_disclosures()
+        self.set_interval(0.5, self.update_scope)
 
     def panes(self):
         return list(self.query(Pane))
@@ -730,6 +798,9 @@ class PhanerisApp(App):
             return
         if line in ("?", "help", "HELP"):
             return self.action_help()
+        question = term.question_of(line)
+        if question:  # asked in the scope the chip shows; never written to the history file
+            return self.ask_from_bar(*question)
         if line.startswith("?"):  # ? TOPIC: that topic of the guide
             return self.open_tab(":guide " + line[1:].strip())
         if line.startswith(":guide"):
@@ -760,12 +831,21 @@ class PhanerisApp(App):
     # ---------------------------------------------------------------- panes and tabs
 
     def open_tab(self, line, pane=None):
-        """Open one screen in a new tab of the pane in focus (or the pane given). ":guide TOPIC" opens the guide."""
+        """Open one screen in a new tab of the pane in focus (or the pane given). ":guide TOPIC" opens the guide,
+        ":welcome" the welcome pane, ":askkg QUESTION" asks the whole knowledge graph (chosen from a suggestion)."""
+        if line == ":welcome":
+            return self._add_tab(line, "Welcome", WelcomeView(line), pane)
+        if line.startswith(":askkg "):
+            return self.ask_in({"kind": "graph"}, line[len(":askkg ") :].strip())
+        words = line.split()
+        if not line.startswith(":") and words and words[-1].upper().strip("\"'") in term.REMOVED_CODES:  # a layout saved before 0.7.0
+            self.notify(f"Skipped {line}: NEWS and WATCH were removed in 0.7.0.", severity="warning")
+            return None
         if line.startswith(":guide"):
             topic = line[len(":guide") :].strip()
             return self._add_tab(line, f"Guide {topic}".strip(), GuideView(topic), pane)
         subject, code, _ = term.parse(shlex.split(line))
-        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, **({"NEWS": NewsView} if not subject else {})}
+        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView}
         widget = views.get(code, ScreenView)(line)
         return self._add_tab(line, f"{subject} {code}".strip() if subject else code, widget, pane)
 
@@ -891,6 +971,131 @@ class PhanerisApp(App):
 
         self.call_after_refresh(fill)
 
+    # ---------------------------------------------------------------- questions and their scope
+
+    @work(thread=True)
+    def load_disclosures(self):
+        from .main import disclosure_rows
+
+        try:
+            rows = disclosure_rows(self.api.get("/console"))
+        except (ApiError, KeyError):
+            return
+        ids = {}
+        for r in rows:
+            ids[r["id"].lower()] = r["id"]
+            ids[r["name"].lower()] = r["id"]
+        self.disclosure_ids = ids
+
+    def current_disclosure(self):
+        """The disclosure a question is about: the one in the focused tab (its subject, or the one it is looked up
+        around), else the last one opened."""
+        try:
+            tab = self.pane().tabs.active
+        except Exception:  # noqa: BLE001  no pane yet
+            tab = None
+        line = self.tab_lines.get(tab or "", "")
+        view = self.ask_views().get(tab)
+        if view is not None and view.scope and view.scope.get("disclosure"):
+            return view.scope["disclosure"]
+        if line and not line.startswith(":"):
+            try:
+                subject, _, opts = term.parse(shlex.split(line))
+            except ValueError:
+                subject, opts = "", {}
+            if opts.get("disclosure"):
+                return opts["disclosure"]
+            if subject.lower() in self.disclosure_ids:
+                return self.disclosure_ids[subject.lower()]
+        return store.read_config().get("last_disclosure")
+
+    def scope_for(self, explicit=None):
+        """The scope Enter will use: the whole graph (/kg, ask --graph, Ctrl-G), else the current disclosure; None when
+        there is no disclosure (nothing is sent then)."""
+        if explicit == "graph" or self.graph_mode:
+            return {"kind": "graph"}
+        d = self.current_disclosure()
+        return {"kind": "disclosure", "disclosure": d} if d else None
+
+    def chip_text(self, scope):
+        if scope is None:
+            return "No disclosure open · Ctrl-G: whole graph"
+        return "Whole knowledge graph" if scope["kind"] == "graph" else f"About {scope['disclosure']}"
+
+    def update_scope(self):
+        """The scope chip beside the bar: where a question typed now would go."""
+        try:
+            typed = self.query_one("#bar", Input).value
+            chip = self.query_one("#scope", Static)
+        except Exception:  # noqa: BLE001  the screen is locked or closing
+            return
+        q = term.question_of(typed) if typed.strip() else None
+        text = self.chip_text(self.scope_for(q[1] if q else None))
+        if str(chip.render()) != text:
+            chip.update(text)
+        chip.set_class(self.graph_mode or bool(q and q[1] == "graph"), "-graph")
+
+    def on_input_changed(self, event):
+        if event.input.id == "bar":
+            self.update_scope()
+
+    def action_whole_graph(self):
+        self.graph_mode = not self.graph_mode
+        self.update_scope()
+        self.notify("Questions go to the whole knowledge graph (metered)." if self.graph_mode else "Questions go to the open disclosure.")
+
+    def ask_views(self):
+        return {tab: v for v in self.query(AskView) for tab in [self._tab_of(v)] if tab}
+
+    def _tab_of(self, widget):
+        for node in widget.ancestors:
+            if isinstance(node, TabPane):
+                return node.id
+        return None
+
+    def ask_from_bar(self, question, explicit):
+        scope = self.scope_for(explicit)
+        if scope is None:
+            self.notify("No disclosure is open. Open one (T-000003 DES), or ask the whole knowledge graph: /kg QUESTION or Ctrl-G.",
+                        severity="warning")  # fmt: skip
+            return None
+        return self.ask_in(scope, question)
+
+    def ask_in(self, scope, question):
+        """Ask in a scope's conversation: the open one (its earlier questions are kept), or a new tab."""
+        key = "graph" if scope["kind"] == "graph" else f"disclosure:{scope['disclosure']}"
+        tab = self.ask_tabs.get(key)
+        views = self.ask_views()
+        if tab in views:
+            for pane in self.panes():
+                if pane.tabs.query(f"#{tab}"):
+                    pane.tabs.active = tab
+            views[tab].send(question)
+            return tab
+        line = "ASK --graph" if scope["kind"] == "graph" else f"{term.arg(scope['disclosure'])} ASK"
+        title = "Ask: whole graph" if scope["kind"] == "graph" else f"Ask: {scope['disclosure']}"
+        tab = self._add_tab(line, title, AskView(line, scope=scope, first=question))
+        self.ask_tabs[key] = tab
+        return tab
+
+    def action_buy(self):
+        """Ctrl-B twice: record a request for 100 questions ($5). Nothing is charged here; an administrator fills it."""
+        now = time.monotonic()
+        if now - self.buy_armed > 5:
+            self.buy_armed = now
+            self.notify("Press Ctrl-B again within 5 seconds to request 100 questions for $5.")
+            return
+        self.buy_armed = 0.0
+        self.request_pack()
+
+    @work(thread=True)
+    def request_pack(self):
+        try:
+            self.api.post("/explore/request-pack", {})
+        except ApiError as e:
+            return self.call_from_thread(self.notify, e.message, severity="error")
+        self.call_from_thread(self.notify, "Requested 100 questions for $5. An administrator adds them until online payment opens.")
+
     # ---------------------------------------------------------------- status, help, idle lock
 
     @work(thread=True, exclusive=True, group="status")
@@ -903,10 +1108,7 @@ class PhanerisApp(App):
         except ApiError as e:
             parts.append(e.message)
         try:
-            q = self.api.get("/explore/usage", background=True)["quota"]
-            parts.append(
-                "questions: no limit" if q.get("unlimited") else f"questions {q['free_left']} of {q['limit']} free, {q.get('credits', 0)} bought"
-            )
+            parts.append(term.allowances_line(self.api.get("/explore/usage", background=True)))
         except ApiError:
             pass
         try:

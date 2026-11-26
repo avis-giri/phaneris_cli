@@ -7,6 +7,38 @@ command line adds no access of its own.
 
 Full documentation: https://www.phaneris.co/docs/terminal
 
+## The Phaneris window
+
+Type `phaneris` and press Enter: the Phaneris window opens, with a bar at the top, panes below and a status line.
+
+```text
+ A name, disclosure or question, then Enter.                               About T-000003
+ The Phaneris window   type in the bar above, then Enter.
+   Open anything   a disclosure id or title, a person, an owner, a patent or a class, then a code
+                   T-000003 SCR    "Carl H. June" GRF    US 8916381 OWN    A61K CLS    (no code: DES)
+   Ask             a question ending in ?, or ask ...    about the disclosure that is open
+                   /kg QUESTION or Ctrl-G                 across the whole knowledge graph
+ Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought.  Buying more: Ctrl-B or phaneris buy.
+```
+
+- **Open anything** by typing a disclosure id or title, a person, an owner, a patent or a class, then a code (Enter
+  alone opens DES). Tab completes. Several matches, or none, show as rows; Enter opens one.
+- **Ask** by typing a question (ending in `?`, or starting with `ask` or `/ask`): it goes to the disclosure that is
+  open. `/kg QUESTION`, `ask --graph QUESTION` or **Ctrl-G** sends it across the **whole knowledge graph** instead.
+  The **scope chip** beside the bar shows where Enter will send it ("About T-000003", "Whole knowledge graph", or "No
+  disclosure open", when nothing is sent) before anything is sent. Each scope keeps its own conversation.
+- **Cited records** in an answer are rows: Enter opens one (DES), `g` its map (GRF). A record outside your
+  disclosures' reach shows the brief the answer returned and says why it cannot be opened further.
+- **A name you cannot reach** offers "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)"
+  first; it is sent only when you choose it and press Enter.
+- **Allowances**: 10 free questions about your disclosures in any 12 hours, 5 free across the whole graph in total,
+  then bought questions shared by both (100 for $5); administrators have no limit. The status line shows them
+  ("Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought"). **Ctrl-B** twice or `phaneris buy`
+  records a request for 100 more.
+
+The window needs one optional extra: `pipx inject phaneris-cli textual`. Without it, `phaneris` opens the line-mode
+command bar and says so. Keys and more: `phaneris guide window`.
+
 ## Install
 
 Needs Python 3.10 or newer and pipx. It has no other dependencies.
@@ -77,9 +109,6 @@ Settings page.
 | `phaneris graph search TEXT [--disclosure ID]` | Records around your disclosure that match |
 | `phaneris graph record NODE [--disclosure ID]` | One record, with a short claim excerpt for a patent |
 | `phaneris graph related NODE [--disclosure ID]` | The records one step from it |
-| `phaneris watch add SUBJECT [--disclosure ID]` | Watch a disclosure, or a record around one of yours (up to 200) |
-| `phaneris watch remove SUBJECT` / `watch list` | Stop watching it; what you watch |
-| `phaneris feed [--all]` | What changed in what you watch since you last looked (`--all`: everything kept) |
 
 Every command takes `--json` for machine-readable output and `--no-color` for plain text. Color and the wordmark
 appear only on a terminal, never with `NO_COLOR` set; `PHANERIS_NO_ANIMATION=1` turns the animation off.
@@ -107,8 +136,6 @@ phaneris go "T-000003 WHY"     # the same, as one line
 | OWN | Ownership and timeline: filings, grant, assignments, licences, trials, papers, with the disclosure date as a rule and later items marked as hindsight | a disclosure or a record |
 | CLS | Patent class trends: filings by year (a braille line chart), share in force, owners. For a disclosure, the class it is grouped under in the graph | a disclosure, a record or a class |
 | HIST | Score history: each kept version's date, deal chance, full estimate and recommendation, what moved, and why the latest moved (the fitted model's terms in the two latest versions) | a disclosure |
-| WATCH | Watch it, or stop watching (a toggle; `--on`, `--off`); with no subject, what you watch | a disclosure or a record |
-| NEWS | What changed in what you watch, grouped by item, newest first; for a subject, its own changes | anything |
 | ASK | A conversation about it | anything |
 | PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
 | HELP | What applies to the subject | anything |
@@ -125,29 +152,11 @@ looked up around the disclosure you opened last (administrators can reach the wh
 eleven inputs' push, coefficient times the input's distance from the training average, and checks that the terms add up
 to the stored deal chance. If they do not (another model scored it), it says so and shows no split.
 
-### What changed
-
-Watch the disclosures and records you care about, and `phaneris feed` (or NEWS) shows what changed since you last
-looked: new or removed patents, assignments, licences, trials, grants and papers; a changed application status, grant
-date or owner; and a score that moved (the deal chance, the recommendation, any metric by more than 0.05, or a metric
-turning Real or Inferred). Changes are found when new data is loaded and when a disclosure is scored again. Each line
-says which screen opens it (a score move opens HIST, anything else the timeline).
-
-```bash
-phaneris watch add T-000003
-phaneris watch add "US 8916381" --disclosure T-000003
-phaneris feed
-```
-
-You can watch your own disclosures, and records within reach of one of them, up to 200 items. The feed is checked
-against what you may see each time it is read: a change about a record that has left your reach is not named, and a
-watched record that has left your reach stops showing. SCR shows a one-line score history; HIST shows every kept version.
-
 ### The guide
 
 `phaneris guide` lists the topics; `phaneris guide TOPIC` (or `phaneris help TOPIC`) opens one: getting started, every
 command, signing in and security, the command bar, subjects and codes, reading each screen, questions and limits,
-watchlists and the feed, full-screen keys, output for scripts, troubleshooting, and what is kept on disk. It ships with
+full-screen keys, output for scripts, troubleshooting, and what is kept on disk. It ships with
 this version, so it works offline and matches the commands you have. On a terminal it pages (your `PAGER`, or a
 simple built-in pager); piped, it prints plainly. `phaneris guide --search WORD` finds a word. In the command bar,
 `? TOPIC`; in full-screen mode, `? TOPIC` or `:guide TOPIC` opens it in a tab.
@@ -186,11 +195,11 @@ are, your office, the questions left and the server's version.
 | `[`, `]`, `ctrl+w` | previous, next tab; close the tab |
 | `<`, `>` | narrow, widen the pane |
 | `ctrl+s` | save this layout (`:save NAME`, `:load NAME`, `:layouts`) |
-| `w` | watch the disclosure or record in this pane, or stop watching |
+| `ctrl+g`, `ctrl+b` | whole knowledge graph on or off; buy 100 questions (press twice) |
 | `?` | help; `ctrl+q` leaves |
 
-With no saved layout, it opens on NEWS: Enter on a line opens that change's screen in a new tab. On any disclosure or
-record screen, `w` watches it (or stops watching).
+With no saved layout, it opens on the welcome pane (see The Phaneris window above). A layout saved before 0.7.0 that
+names NEWS or WATCH still opens; those tabs are skipped with a note.
 
 GRF is a map you can walk: arrows move, Enter re-centres on a record (one more lookup), Backspace goes back, `d` shows
 the record's brief beside it, `o` opens it in a tab. On PORT, Enter opens a disclosure's scores. Layouts are kept in

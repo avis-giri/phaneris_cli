@@ -55,7 +55,7 @@ def test_the_bar_opens_screens_in_tabs_and_panes(server, capsys, monkeypatch):  
 
     async def go():
         async with app.run_test(size=(140, 45)) as pilot:
-            assert app.query(tui.NewsView)  # with no saved layout, the default opens what changed
+            assert app.query(tui.WelcomeView)  # with no saved layout, the default opens the welcome pane
             await type_line(pilot, "T-1 SCR")
             await settle(pilot, app)
             assert "Deal stages" in text_of(app) and len(app.pane().tabs.query("TabPane")) == 2
@@ -213,7 +213,8 @@ def test_help_status_and_amber(server, capsys, monkeypatch):  # noqa: F811
         async with app.run_test(size=(120, 40)) as pilot:
             await settle(pilot, app)
             status = str(app.query_one("#status").render())
-            assert "Pat (client)" in status and "office aldermoor" in status and "9 of 10 free" in status and "server abc1234" in status
+            assert "Pat (client)" in status and "office aldermoor" in status
+            assert "Questions: 9 of 10 free about disclosures, 4 of 5 whole graph, 0 bought" in status and "server abc1234" in status
             assert app.has_class("amber")
             app.screen.set_focus(None)  # not typing in the bar
             await pilot.press("question_mark")
@@ -250,60 +251,21 @@ def test_tab_in_the_bar_suggests_from_history(server, capsys, monkeypatch):  # n
     run(go())
 
 
-def test_news_pane_opens_each_change_and_marks_the_feed_seen(server, capsys, monkeypatch):  # noqa: F811
-    app = make_app(server, capsys, monkeypatch)
-
-    async def go():
-        async with app.run_test(size=(140, 40)) as pilot:
-            await settle(pilot, app)
-            news = app.query_one(tui.NewsView)
-            table = news.query_one(tui.DataTable)
-            assert table.row_count == 3 and "since you last looked" in str(news.query_one(".title").render())
-            assert [x for x in Fake.log if x[1] == "/api/feed/seen"]
-            table.focus()
-            await pilot.press("enter")  # the newest line: a score move opens the history
-            await settle(pilot, app)
-            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
-            assert any("T-1 HIST" in t for t in titles)
-            assert "2 versions kept" in "\n".join(str(v.query_one(".body").render()) for v in app.query(tui.ScreenView))
-
-    run(go())
-
-
-def test_w_watches_the_pane_subject(server, capsys, monkeypatch):  # noqa: F811
-    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
-    notes = []
-    monkeypatch.setattr(app, "notify", lambda message, **kw: notes.append(message))
-
-    async def go():
-        async with app.run_test(size=(140, 40)) as pilot:
-            await settle(pilot, app)
-            app.query_one(tui.ScreenView).focus()
-            await pilot.press("w")
-            await settle(pilot, app)
-            assert [x[2] for x in Fake.log if x[1] == "/api/watch" and x[0] == "POST"] == [{"target": "T-1", "kind": "disclosure"}]
-            await pilot.press("w")
-            await settle(pilot, app)
-            assert notes[-2:] == ["Watching Test one.", "Stopped watching Test one."]
-
-    run(go())
-
-
 def test_guide_pane_from_the_bar(server, capsys, monkeypatch):  # noqa: F811
     app = make_app(server, capsys, monkeypatch, start="T-1 DES")
 
     async def go():
         async with app.run_test(size=(120, 40)) as pilot:
             await settle(pilot, app)
-            await type_line(pilot, "? watch")
+            await type_line(pilot, "? questions")
             await settle(pilot, app)
             view = app.query_one(tui.GuideView)
-            assert "Watchlists and the feed" in str(view.query_one(".body").render())
+            assert "Questions and limits" in str(view.query_one(".body").render())
             await type_line(pilot, ":guide")
             await settle(pilot, app)
             assert len(app.query(tui.GuideView)) == 2
             titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
-            assert "Guide watch" in titles and "Guide" in titles
+            assert "Guide questions" in titles and "Guide" in titles
 
     run(go())
 
@@ -347,5 +309,170 @@ def test_status_line_refreshes_and_says_when_the_server_is_not_answering(server,
             await pilot.pause(0.8)
             await app.workers.wait_for_complete()
             assert len([x for x in Fake.log if x[1] == "/api/health"]) > before and "server abc1234" in status()
+
+    run(go())
+
+
+def posts(path):
+    return [x[2] for x in Fake.log if x[0] == "POST" and x[1] == path]
+
+
+def log_of(view):
+    return "\n".join(str(line.text) for line in view.query_one(tui.RichLog).lines)
+
+
+def test_welcome_pane_shows_what_to_type_the_disclosures_and_the_allowances(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            w = app.query_one(tui.WelcomeView)
+            intro = str(w.query_one(".intro").render())
+            assert "/kg QUESTION or Ctrl-G" in intro and "T-000003 SCR" in intro and "Tab" in intro
+            assert w.query_one(tui.DataTable).row_count == 1  # the office's disclosures (PORT)
+            assert "Questions: 9 of 10 free about disclosures, 4 of 5 whole graph" in str(w.query_one(".allowances").render())
+            w.query_one(tui.DataTable).focus()
+            await pilot.press("enter")
+            await settle(pilot, app)
+            assert any("T-1 SCR" in str(t.label) for t in app.pane().tabs.query("Tab"))
+
+    run(go())
+
+
+async def typed(pilot, text):
+    await pilot.click("#bar")
+    app = pilot.app
+    app.query_one("#bar").value = text
+    await pilot.pause()
+    return str(app.query_one("#scope").render())
+
+
+def test_questions_from_the_bar_follow_the_scope_chip(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            assert await typed(pilot, "Who invented it?") == "About T-1"  # the disclosure in focus
+            assert await typed(pilot, "/kg What is CAR-T?") == "Whole knowledge graph"
+            assert not posts("/api/explore")  # the chip shows the scope before anything is sent
+            await type_line(pilot, "Who invented it?")
+            await settle(pilot, app)
+            assert posts("/api/explore")[-1]["scope"] == {"kind": "disclosure", "disclosure": "T-1"}
+            await type_line(pilot, "/kg What is CAR-T?")
+            await settle(pilot, app)
+            assert posts("/api/explore")[-1] == {"question": "What is CAR-T?", "history": [], "scope": {"kind": "graph"}}
+            await type_line(pilot, "/kg And its owners?")  # the same scope: the same conversation, with its history
+            await settle(pilot, app)
+            assert posts("/api/explore")[-1]["history"][0] == {"role": "user", "content": "What is CAR-T?"}
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert titles.count("Ask: whole graph") == 1 and "Ask: T-1" in titles
+            from phaneris_cli import history
+
+            assert not [h for h in history.load() if "CAR-T" in h or "invented" in h]  # questions are never kept
+
+    run(go())
+
+
+def test_ctrl_g_switches_to_the_whole_graph_and_no_disclosure_sends_nothing(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+    notes = []
+    monkeypatch.setattr(app, "notify", lambda message, **kw: notes.append(message))
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            assert await typed(pilot, "Who owns it?") == "No disclosure open · Ctrl-G: whole graph"
+            await type_line(pilot, "Who owns it?")
+            await settle(pilot, app)
+            assert not posts("/api/explore") and "No disclosure is open" in notes[-1]
+            await pilot.press("ctrl+g")
+            assert await typed(pilot, "Who owns it?") == "Whole knowledge graph" and app.query_one("#scope").has_class("-graph")
+            await type_line(pilot, "Who owns it?")
+            await settle(pilot, app)
+            assert posts("/api/explore")[-1]["scope"] == {"kind": "graph"}
+
+    run(go())
+
+
+def test_cited_records_open_within_reach_and_explain_otherwise(server, capsys, monkeypatch):  # noqa: F811
+    from phaneris_cli import main as cli_main
+
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+    cli_main.remember(last_disclosure="T-1")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "/kg What is near it?")
+            await settle(pilot, app)
+            view = app.query_one(tui.AskView)
+            box = view.query_one("#cited", tui.OptionList)
+            assert box.option_count == 2 and "Records cited, below" in log_of(view)
+            box.focus()
+            box.highlighted = 1  # pat:999999: outside the reach of T-1
+            await pilot.press("enter")
+            await settle(pilot, app)
+            text = " ".join(log_of(view).split())  # the log wraps lines
+            assert "Far patent" in text and "SOMEONE ELSE" in text and "cannot be opened further: it is outside the reach of T-1" in text
+            box.focus()
+            box.highlighted = 0  # T-1: within reach, opens its brief
+            await pilot.press("enter")
+            await settle(pilot, app)
+            assert any(str(t.label).startswith("T-1 DES") for t in app.pane().tabs.query("Tab"))
+
+    run(go())
+
+
+def test_a_name_out_of_reach_offers_the_whole_graph_and_spends_only_on_enter(server, capsys, monkeypatch):  # noqa: F811
+    from phaneris_cli import main as cli_main
+
+    cli_main.remember(last_disclosure="T-1")
+    app = make_app(server, capsys, monkeypatch, start="Nobody Atall GRF")
+    cli_main.remember(last_disclosure="T-1")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            box = app.query_one("#choices", tui.OptionList)
+            assert str(box.get_option_at_index(0).prompt).startswith("Ask the whole knowledge graph about 'Nobody Atall' (4 free")
+            assert not posts("/api/explore")  # nothing spent by showing it
+            box.focus()
+            box.highlighted = 0
+            await pilot.press("enter")  # the confirmation
+            await settle(pilot, app)
+            assert posts("/api/explore") == [{"question": "Who or what is Nobody Atall?", "history": [], "scope": {"kind": "graph"}}]
+
+    run(go())
+
+
+def test_a_saved_layout_with_news_still_opens(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+    tui.write_layouts({"default": {"split": 0.5, "panes": [{"tabs": ["NEWS", "T-1 WATCH", "T-1 SCR"]}]}})
+    notes = []
+    monkeypatch.setattr(app, "notify", lambda message, **kw: notes.append(message))
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert titles == ["T-1 SCR"] and sum("removed in 0.7.0" in n for n in notes) == 2
+
+    run(go())
+
+
+def test_ctrl_b_twice_requests_the_pack(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await pilot.press("ctrl+b")
+            await settle(pilot, app)
+            assert not posts("/api/explore/request-pack")
+            await pilot.press("ctrl+b")
+            await settle(pilot, app)
+            assert len(posts("/api/explore/request-pack")) == 1
 
     run(go())

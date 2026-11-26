@@ -12,7 +12,7 @@ from phaneris_cli import main as cli
 
 # Facts the guide shares with the website's docs page (tests/test_docs_pages.py in the service checks the same list).
 SHARED_FACTS = ("10 free in any 12 hours", "5 free in total", "100 for $5", "300 an hour", "30 days", "15 minutes", "Codes last 10 minutes",
-                "up to 200 items", "0.5 is the middle")  # fmt: skip
+                "0.5 is the middle")  # fmt: skip
 
 
 def text():
@@ -26,7 +26,7 @@ def test_every_code_and_command_is_in_the_guide():
         assert "phaneris " in body and re.search(rf"phaneris [^\n]*\b{code}\b", body), code
     for command in cli.SUBCOMMANDS:
         assert re.search(rf"^  {command}\b", body, re.M), command
-    for command in ("graph search", "graph record", "graph related", "watch add", "watch remove", "watch list", "disclosures show"):
+    for command in ("graph search", "graph record", "graph related", "disclosures show"):
         assert f"  {command}" in body, command
     for fact in SHARED_FACTS:
         assert fact in body, fact
@@ -42,7 +42,7 @@ def test_it_fits_the_terminal(width):
 
 
 def test_topics_by_name_alias_and_code():
-    assert guide.find("watch") == guide.find("feed") == guide.find("NEWS") == "watch"
+    assert guide.find("window") == guide.find("kg") == guide.find("ask") == "window" and guide.find("watch") is None
     assert guide.find("scr") == "screens" and guide.find("security") == "signin" and guide.find("priv") == "privacy"
     assert guide.find("nonsense") is None
 
@@ -50,8 +50,8 @@ def test_topics_by_name_alias_and_code():
 def test_guide_and_help_topic_commands(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "80")
     out = run(capsys, "guide")
-    assert "The Phaneris guide (version" in out and "  watch      Watchlists and the feed" in out
-    assert "Reading the screens" in run(capsys, "help", "screens") and "Deal stages" not in run(capsys, "help", "watch")
+    assert "The Phaneris guide (version" in out and out.index("  window     The Phaneris window") < out.index("  start ")
+    assert "Reading the screens" in run(capsys, "help", "screens") and "Deal stages" not in run(capsys, "help", "questions")
     assert "HIST. Every kept version" in run(capsys, "guide", "hist")
     assert 'no topic "nonsense"' in failed(capsys, "guide", "nonsense")
     found = run(capsys, "guide", "--search", "Inferred")
@@ -83,7 +83,7 @@ def test_paged_on_a_terminal_plain_when_piped(monkeypatch):
 
 def test_question_mark_topics_in_the_command_bar(server, capsys, monkeypatch):  # noqa: F811
     signed(server, capsys, monkeypatch)
-    lines = iter(["? watch", "?", "guide", "? nonsense"])
+    lines = iter(["? window", "?", "guide", "? nonsense"])
 
     def ask(prompt=""):
         try:
@@ -96,10 +96,20 @@ def test_question_mark_topics_in_the_command_bar(server, capsys, monkeypatch):  
     ctx = term.Ctx(cli.signed_in(cli.global_options(["--server", server[0]])[0]), cli.Out(cli.global_options([])[0]), None)
     term.command_bar(ctx)
     out = capsys.readouterr().out
-    assert "Watchlists and the feed" in out and "Guide topics: ? start" in out and out.count("The Phaneris guide (version") == 2
+    assert "The Phaneris window" in out and "Guide topics: ? window" in out and out.count("The Phaneris guide (version") == 2
 
 
 def test_who_reaches_what():
     body = text()
     assert "Office users and developers stay inside the named disclosure's neighbourhood" in body
     assert "Administrators read every graph, whole, even when they name a disclosure" in body
+
+
+def test_the_window_comes_first_and_says_how_to_ask():
+    assert guide.TOPICS[0][0] == "window"
+    body = guide.SLUGS["window"][1]
+    for must in ("Type phaneris and press Enter", "pipx inject phaneris-cli textual", "/kg QUESTION", "Ctrl-G", "scope chip",
+                 "About T-000003", "Whole knowledge graph", "Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought",
+                 "100 for $5", "Ctrl-B", "It is sent only when you choose it"):  # fmt: skip
+        assert must in body, must
+    assert "watch" not in text().lower().replace("names news or watch", "")
