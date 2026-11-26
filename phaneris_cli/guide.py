@@ -101,7 +101,11 @@ What the terminal keeps is a separate sign-in, not your password. It lasts 30 da
 
 Sessions: see and end your sign-ins on the console's Settings page; administrators can end anyone's on Users. If you lose a computer, end its sign-in there. If your account is disabled, its sign-ins stop at once. phaneris logout ends this one.
 
-Idle sign-out is being added to the service: once it is on, a browser session or terminal sign-in left idle for the set time ends, and you sign in again. Every sign-in and every ending of one is recorded with the account, the time and how it was made.
+Idle sign-out: a sign-in not used for 2 minutes ends, in the console and here, and the next command says so; run phaneris login again. The limit comes from the service, so the console and the terminal always agree. The command bar and full-screen mode lock themselves at the limit: they clear the screen, end the sign-in and say why.
+
+Two-step sign-in: if your account uses an authenticator app (required for administrators), phaneris login asks for the 6-digit code after the password; scripts pass it with --code. A recovery code works in its place, once. Set it up on the console's Settings page.
+
+Every sign-in and every ending of one, including idle sign-outs, is recorded with the account, the time and how it was made.
 """,
     ),
     (
