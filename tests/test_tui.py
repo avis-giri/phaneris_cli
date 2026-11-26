@@ -14,7 +14,7 @@ pytest.importorskip("textual")
 from test_cli import Fake, server, signed  # noqa: E402, F401  the fake server and sign-in
 
 from phaneris_cli import main as cli  # noqa: E402
-from phaneris_cli import tui  # noqa: E402
+from phaneris_cli import store, tui  # noqa: E402
 
 
 def make_app(srv, capsys, monkeypatch, start=None, idle=None, theme=None):
@@ -151,7 +151,7 @@ def test_timeline_and_class_draw_for_the_pane_width(server, capsys, monkeypatch,
     run(go())
 
 
-def test_idle_lock_covers_the_screen_until_a_key(server, capsys, monkeypatch):  # noqa: F811
+def test_idle_lock_signs_out_and_leaves(server, capsys, monkeypatch):  # noqa: F811
     app = make_app(server, capsys, monkeypatch, start="T-1 SCR", idle=3600)
 
     async def go():
@@ -165,9 +165,15 @@ def test_idle_lock_covers_the_screen_until_a_key(server, capsys, monkeypatch):  
             for _ in range(5):
                 await pilot.pause()
             assert app.is_locked and any(isinstance(s, tui.LockScreen) for s in app.screen_stack)
+            for _ in range(20):  # the sign-in is ended on the server and forgotten here, in the background
+                if ("POST", "/api/cli/logout", {"why": "idle"}) in Fake.log:
+                    break
+                await asyncio.sleep(0.05)
+            assert ("POST", "/api/cli/logout", {"why": "idle"}) in Fake.log
+            assert store.load_token(app.api.server) is None
             await pilot.press("x")
-            await settle(pilot, app)
-            assert not isinstance(app.screen, tui.LockScreen)
+            await pilot.pause()
+            assert app._exit  # any key leaves full-screen mode
 
     run(go())
 

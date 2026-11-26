@@ -1170,12 +1170,19 @@ def command_bar(ctx):
     from . import history
     from .main import Fail, Fail_and_exit, explain
 
+    from . import idle
+
     s = ctx.s
     read = _reader(ctx)
+    mins = idle.minutes(ctx.api)
     ctx.p(s.bold("Phaneris command bar.") + s.dim("  T-000003 SCR, then Enter. Tab suggests, ? helps, Ctrl-D leaves."))
     while True:
         try:
-            line = read().strip()
+            line = idle.timed(read, mins * 60).strip()
+        except idle.IdleTimeout:
+            print()
+            idle.lock_out(ctx.api, mins)
+            return
         except (EOFError, KeyboardInterrupt):
             print()
             return

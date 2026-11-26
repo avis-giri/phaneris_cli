@@ -23,12 +23,11 @@ from textual.suggester import Suggester
 from textual.widgets import DataTable, Input, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets.option_list import Option
 
-from . import __version__, history, store, term
+from . import __version__, history, idle, store, term
 from .api import ApiError, CachedApi
 from .style import Style, pct
 
 MAX_PANES = 4
-IDLE_SECONDS = 30 * 60
 STATUS_SECONDS = 60
 CODES = list(term.CODES)
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
@@ -554,8 +553,8 @@ class HelpScreen(ModalScreen):
 
 
 class LockScreen(ModalScreen):
-    """Shown after a long time without use. Covers every pane; any key brings them back. Nothing is stored: if the
-    sign-in has ended in the meantime, it says to sign in again from the command line."""
+    """Shown at the idle limit, after the sign-in has been ended on the server and forgotten here. Covers every pane;
+    any key leaves full-screen mode."""
 
     DEFAULT_CSS = (
         "LockScreen { align: center middle; background: $background 100%; } LockScreen > Static { width: 70; padding: 1 2; border: round $accent; }"
@@ -563,16 +562,11 @@ class LockScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         minutes = round(self.app.idle_seconds / 60)
-        yield Static(
-            f"[b]phaneris.[/b]  Locked after {minutes} minutes without use.\n\n"
-            "Press any key to carry on. If your sign-in has ended, leave with ctrl+q and run: phaneris login"
-        )
+        yield Static(f"[b]phaneris.[/b]  Signed out after {minutes} minutes without use.\n\nPress any key to leave, then run: phaneris login")
 
     def on_key(self, event):
         event.stop()
-        self.app.last_activity = time.monotonic()
-        self.dismiss()
-        self.app.check_sign_in()
+        self.app.exit()
 
 
 # ------------------------------------------------------------------ the app
@@ -616,7 +610,8 @@ class PhanerisApp(App):
         super().__init__()
         self.api, self.args, self.start_line = api, args, start
         self.theme_name = (getattr(args, "theme", None) or os.environ.get("PHANERIS_THEME") or "phaneris").lower()
-        self.idle_seconds = idle_seconds or float(os.environ.get("PHANERIS_IDLE_MINUTES", IDLE_SECONDS / 60)) * 60
+        # the server's idle limit, so the terminal and the console agree (it ends idle sign-ins by itself too)
+        self.idle_seconds = idle_seconds or idle.minutes(api) * 60
         self.last_activity = time.monotonic()
         self.focused_pane = 0
         self.split = 0.5
@@ -942,8 +937,20 @@ class PhanerisApp(App):
             self.lock_screen()
 
     def lock_screen(self):
+        """Clear every pane, end the sign-in on the server and forget it here, then say why."""
         self.is_locked = True
-        self.push_screen(LockScreen(), callback=lambda _: setattr(self, "locked", False))
+        for pane in self.panes():
+            pane.remove_children()
+        self.push_screen(LockScreen())
+        self.end_sign_in()
+
+    @work(thread=True)
+    def end_sign_in(self):
+        try:
+            self.api.post("/cli/logout", {"why": "idle"})
+        except ApiError:
+            pass  # already ended on the server
+        store.delete_token(self.api.server)
 
     @work(thread=True)
     def check_sign_in(self):

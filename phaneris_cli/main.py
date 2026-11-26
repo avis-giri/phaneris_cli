@@ -148,8 +148,12 @@ def explain(e):
     """A server error as a message and the next step."""
     if e.status == 0:
         return Fail(e.message, "Check your network, then run: phaneris doctor")
+    if e.status == 401 and e.code == "idle_signed_out":
+        return Fail(e.message, "Run: phaneris login")
     if e.status == 401:
         return Fail(e.message, "Your sign-in may have ended. Run: phaneris login")
+    if e.code == "two_step_setup_required":
+        return Fail(e.message, "Sign in to the console in a browser, set up two-step sign-in, then run: phaneris login")
     return Fail(e.message, HINTS.get(e.code))
 
 
@@ -258,9 +262,24 @@ def password_login(api, name, args, out):
     office = args.office
     if office is None and sys.stdin.isatty() and not args.password_stdin and not out.as_json:
         office = choose_office(api, out)
+    body = {"username": username, "password": password, "workspace": office or None, "client_name": name}
+    if args.code:
+        body["code"] = args.code
     try:
-        got = api.post("/cli/login/password", {"username": username, "password": password, "workspace": office or None, "client_name": name})
+        try:
+            got = api.post("/cli/login/password", body)
+        except ApiError as e:
+            if e.code != "two_step_required":
+                raise
+            if not sys.stdin.isatty() or args.password_stdin:
+                fail(e.message, "Add --code with the 6-digit code from your authenticator app, or use --browser.")
+            body["code"] = input("Two-step code from your authenticator app (or a recovery code): ").strip()
+            got = api.post("/cli/login/password", body)
     except ApiError as e:
+        if e.code == "two_step_invalid":
+            fail(e.message, "Codes change every 30 seconds; enter the newest one, or a recovery code.")
+        if e.code == "two_step_setup_required":
+            fail(e.message, "Admins set up two-step sign-in in the console first (Settings).")
         if e.status == 401:
             fail(e.message, "Check the username and password. After 5 wrong tries the username waits 15 minutes.")
         if e.status == 429:
@@ -270,6 +289,7 @@ def password_login(api, name, args, out):
         raise
     finally:
         password = None  # noqa: F841  dropped as soon as it is sent
+        body = None
     return got["token"]
 
 
@@ -817,6 +837,7 @@ def build_parser():
     s.add_argument("--username", help="your username (or PHANERIS_USERNAME)")
     s.add_argument("--office", help="the office to work in (default: your own)")
     s.add_argument("--password-stdin", action="store_true", help="read the password from standard input, for scripts with a secrets manager")
+    s.add_argument("--code", help="the 6-digit two-step code (or a recovery code), when two-step sign-in is on")
     s.add_argument("--browser", action="store_true", help="approve the sign-in in the console instead of typing a password")
     s.add_argument("--no-browser", action="store_true", help="with --browser: only print the link")
     s.add_argument("--name", help="what to call this computer in your list of sign-ins")

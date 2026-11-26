@@ -47,6 +47,10 @@ class Api:
                 err = json.loads(e.read() or b"{}")
             except ValueError:
                 err = {}
+            if e.code == 401 and err.get("code") == "idle_signed_out" and self.token:
+                from . import store
+
+                store.delete_token(self.server)  # the server ended it; nothing should keep the old token here
             raise ApiError(e.code, err.get("error") or f"The server answered {e.code}.", err.get("code")) from None
         except urllib.error.URLError as e:
             raise ApiError(0, f"Could not reach {self.server}: {e.reason}") from None

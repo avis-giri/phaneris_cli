@@ -203,6 +203,8 @@ class Fake(BaseHTTPRequestHandler):
     seen = False
     approved = False
     role = "client"
+    two_step = False  # the account has two-step sign-in on: password sign-in needs code 123456
+    idle = False  # the server has ended the sign-in for being idle
     drivers = DRIVERS
     quota = {"unlimited": False, "kind": "disclosure", "limit": 10, "window_hours": 12, "free_left": 9, "credits": 0, "remaining": 9}
 
@@ -218,6 +220,9 @@ class Fake(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _authed(self):
+        if Fake.idle:
+            self._send(401, {"error": "Signed out after 2 minutes without use. Run phaneris login.", "code": "idle_signed_out"})
+            return False
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
             self._send(401, {"error": "Sign in to continue.", "code": "signed_out"})
             return False
@@ -230,7 +235,7 @@ class Fake(BaseHTTPRequestHandler):
         if self.headers.get("X-Phaneris-Background"):
             Fake.background.append(url.path)
         if url.path == "/api/health":
-            return self._send(200, {"ok": True, "version": "abc1234"})
+            return self._send(200, {"ok": True, "version": "abc1234", "idle_minutes": 2})
         if url.path == "/api/workspaces":
             return self._send(200, {"workspaces": [{"id": "aldermoor", "name": "Aldermoor", "kind": "office"}]})
         if not self._authed():
@@ -349,6 +354,10 @@ class Fake(BaseHTTPRequestHandler):
         if self.path == "/api/cli/login/password":
             if body.get("password") != SECRET:
                 return self._send(401, {"error": "The username or password is not right."})
+            if Fake.two_step and not body.get("code"):
+                return self._send(401, {"error": "Enter the 6-digit code from your authenticator app.", "code": "two_step_required"})
+            if Fake.two_step and body.get("code") != "123456":
+                return self._send(401, {"error": "That code is not right.", "code": "two_step_invalid"})
             return self._send(200, {"status": "approved", "token": TOKEN, "workspace": body.get("workspace") or "aldermoor"})
         if self.path == "/api/cli/login/start":
             return self._send(200, {"device_code": "dev", "user_code": "ABCD-EFGH", "expires_in": 30, "interval": 0})
@@ -392,7 +401,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
     Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.watches, Fake.seen = [], False, "client", DRIVERS, [], False
-    Fake.background = []
+    Fake.background, Fake.two_step, Fake.idle = [], False, False
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", tmp_path

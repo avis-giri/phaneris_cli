@@ -43,6 +43,17 @@ The sign-in lasts 30 days. It is kept in the macOS keychain, or elsewhere in `~/
 readable only by your account. See and end your sign-ins on the console's Settings page; administrators can end
 anyone's on Users.
 
+### Two-step sign-in and signing out after idle time
+
+If your account has two-step sign-in on (admins must), `phaneris login` asks for the 6-digit code from your
+authenticator app after the password; a recovery code works too. Scripts pass it with `--code`.
+
+A sign-in ends after **2 minutes without use** (the server's limit, the same as the console). The next command then
+says "Signed out after 2 minutes without use" and forgets the old sign-in; run `phaneris login` again. The command
+bar and full-screen mode watch the keyboard too: at the limit they clear the screen, end the sign-in on the server
+and say why. The sign-in also ends at 30 days, when you change your password, or when you end it on the console's
+Settings page.
+
 ## Commands
 
 | Command | What it does |
