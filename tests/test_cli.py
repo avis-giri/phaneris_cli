@@ -155,8 +155,43 @@ MAP = {
 }
 
 
+FEED = {
+    "since": "2026-11-20T09:00:00+00:00",
+    "all": False,
+    "hidden": 1,
+    "events": 3,
+    "items": [
+        {"kind": "disclosure", "target": "T-1", "context": "T-1", "label": "Test one", "latest": "2026-11-25T10:00:00+00:00", "events": [
+            {"id": 3, "at": "2026-11-25T10:00:00+00:00", "event": "score moved", "graph": None, "source": "re-score",
+             "detail": {"moves": [{"what": "deal chance", "from": 0.05, "to": 0.08},
+                                  {"what": "recommendation", "from": "Review", "to": "Pursue"}]}}]},
+        {"kind": "record", "target": "pat:1", "context": "T-1", "label": "A patent", "latest": "2026-11-24T10:00:00+00:00", "events": [
+            {"id": 2, "at": "2026-11-24T10:00:00+00:00", "event": "new licence", "graph": "phaneron", "source": "graph load",
+             "detail": {"date": "2026-10-02", "conveyance": "exclusive license", "to": "A LICENSEE"}},
+            {"id": 1, "at": "2026-11-24T10:00:00+00:00", "event": "new patent", "graph": "phaneron", "source": "graph load",
+             "detail": {"record": None, "name": None, "group": "patents", "out_of_reach": True}}]},
+    ],
+}  # fmt: skip
+HISTORY = {
+    "id": "T-1",
+    "name": "Test one",
+    "versions": [
+        {"source": "job", "import_id": None, "job_public_id": "J-9", "pack": "p1", "scored_at": "2026-11-25T10:00:00+00:00", "deal_chance": 0.08,
+         "full_estimate": 0.1, "recommendation": "Pursue", "metrics": {}, "moved": [{"what": "deal chance", "from": 0.05, "to": 0.08},
+                                                                                     {"what": "ipd score", "metric": "ipd", "from": 0.5, "to": 0.7}]},
+        {"source": "import", "import_id": 3, "job_public_id": None, "pack": "p1", "scored_at": "2026-10-01T10:00:00+00:00", "deal_chance": 0.05,
+         "full_estimate": 0.07, "recommendation": "Review", "metrics": {}, "moved": []},
+    ],
+    "why": {"available": True, "log_odds_change": 0.45, "note": "Each input's push.",
+            "inputs": [{"input": "ipd", "label": "IP defensibility score", "from": 0.1, "to": 0.5, "change": 0.4},
+                       {"input": "mass", "label": "Share of facts found", "from": 0.0, "to": 0.05, "change": 0.05}]},
+}  # fmt: skip
+
+
 class Fake(BaseHTTPRequestHandler):
     log = []
+    watches = []
+    seen = False
     approved = False
     role = "client"
     drivers = DRIVERS
@@ -199,6 +234,19 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {"drivers": Fake.drivers})
         if url.path == "/api/board":
             return self._send(200, BOARD)
+        if url.path == "/api/watch":
+            return self._send(200, {"watches": Fake.watches, "limit": 200})
+        if url.path == "/api/feed":
+            feed = json.loads(json.dumps(FEED))
+            if q.get("item"):
+                feed["items"] = [i for i in feed["items"] if i["target"] == q["item"]]
+            if q.get("all"):
+                feed.update(all=True, since=None)
+            elif Fake.seen:
+                feed.update(items=[], hidden=0, events=0)
+            return self._send(200, feed)
+        if url.path == "/api/disclosures/T-1/history":
+            return self._send(200, {"history": HISTORY})
         if url.path == "/api/disclosures/T-1/timeline":
             return self._send(200, {"timeline": {"id": "T-1", "name": "Test one", **TIMELINE}})
         if url.path in ("/api/graph/timeline", "/api/graph/class"):
@@ -300,6 +348,18 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         if self.path == "/api/intake":
             return self._send(201, {"job": "J-9"})
+        if self.path == "/api/watch":
+            w = {"kind": body.get("kind", "record"), "target": body["target"], "context": body.get("disclosure") or body["target"],
+                 "label": "Test one" if body["target"] == "T-1" else "A patent", "reachable": True}  # fmt: skip
+            Fake.watches = [x for x in Fake.watches if x["target"] != w["target"]] + [w]
+            return self._send(200, {"watch": {**w, "new": True}})
+        if self.path == "/api/watch/remove":
+            before = len(Fake.watches)
+            Fake.watches = [x for x in Fake.watches if x["target"] != body["target"]]
+            return self._send(200, {"removed": len(Fake.watches) < before})
+        if self.path == "/api/feed/seen":
+            Fake.seen = True
+            return self._send(200, {"seen_at": "2026-11-26T10:00:00+00:00"})
         self._send(404, {"error": "Not found."})
 
 
@@ -313,7 +373,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "TOKEN_FILE", str(tmp_path / "token.json"))
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    Fake.log, Fake.approved, Fake.role, Fake.drivers = [], False, "client", DRIVERS
+    Fake.log, Fake.approved, Fake.role, Fake.drivers, Fake.watches, Fake.seen = [], False, "client", DRIVERS, [], False
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", tmp_path
@@ -851,3 +911,69 @@ def test_cls_draws_no_line_across_missing_years(server, capsys, monkeypatch):
     run(capsys, "T-1", "DES")
     out = run(capsys, "A01B 1/00", "CLS")
     assert "2011: 98   2022: 1   2023: 1" in out and "years missing in between" in out and "peak" not in out
+
+
+def posts(path):
+    return [x[2] for x in Fake.log if x[0] == "POST" and x[1] == path]
+
+
+def test_watch_add_list_remove(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    assert "Watching Test one" in run(capsys, "watch", "add", "T-1")
+    assert posts("/api/watch")[-1] == {"target": "T-1", "kind": "disclosure"}
+    assert "Watching A patent" in run(capsys, "watch", "add", "pat:1", "--disclosure", "T-1")
+    assert posts("/api/watch")[-1] == {"target": "pat:1", "kind": "record", "disclosure": "T-1"}
+    out = run(capsys, "watch", "list")
+    assert "2 of 200" in out and "Test one" in out and "around T-1" in out
+    assert json.loads(run(capsys, "--json", "watch", "list"))["limit"] == 200
+    assert "Stopped watching" in run(capsys, "watch", "remove", "T-1")
+    assert "not a watch command" in failed(capsys, "watch", "sometimes", "T-1")
+    assert "name what to watch" in failed(capsys, "watch", "add")
+    assert "not within reach" in failed(capsys, "watch", "add", "pat:999999", "--disclosure", "T-1")
+
+
+def test_watch_code_toggles(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    assert "Watching" in run(capsys, "T-1", "WATCH")
+    assert "Stopped watching" in run(capsys, "T-1", "WATCH")
+    assert "Nothing yet" in run(capsys, "WATCH")
+
+
+def test_feed_since_last_seen_then_marks_it(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "watch", "add", "T-1")
+    out = run(capsys, "feed")
+    assert "since you last looked, 2026-11-20 09:00" in out
+    assert out.index("Test one") < out.index("A patent")  # newest item first
+    assert "score moved: deal chance 5.0% to 8.0%; recommendation Review to Pursue" in out and "open: T-1 HIST" in out
+    assert "new licence: exclusive license to A LICENSEE, recorded 2026-10-02" in out and "open: pat:1 OWN --disclosure T-1" in out
+    assert "new patent (a record outside your reach)" in out and "1 change is not shown" in out and "Marked as seen" in out
+    assert len(posts("/api/feed/seen")) == 1
+    assert "Nothing new" in run(capsys, "feed")
+    assert "Test one" in run(capsys, "feed", "--all") and len(posts("/api/feed/seen")) == 2  # --all does not mark
+    one = run(capsys, "pat:1", "NEWS", "--disclosure", "T-1")
+    assert "new licence" in one and "score moved" not in one
+    assert [x for x in Fake.log if x[1] == "/api/feed"][-1][2] == {"all": "1", "item": "pat:1"}
+    assert json.loads(run(capsys, "--json", "feed", "--all"))["events"] == 3
+
+
+def test_hist_lists_versions_and_why(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "HIST")
+    assert "2 versions kept" in out and out.index("2026-11-25") < out.index("2026-10-01")
+    assert "re-score J-9" in out and "data import" in out and "      deal chance 5.0% to 8.0%\n      ipd score 0.50 to 0.70" in out
+    monkeypatch.setenv("COLUMNS", "140")
+    assert "re-score J-9     deal chance 5.0% to 8.0%; ipd score 0.50 to 0.70" in run(capsys, "T-1", "HIST")
+    assert "first kept version" in out and "IP defensibility score" in out and "+0.40" in out and "+0.45 log-odds" in out
+    assert json.loads(run(capsys, "--json", "T-1", "HIST"))["why"]["available"] is True
+    assert "History" in run(capsys, "T-1", "SCR") and "5.0% on 2026-10-01 to 8.0% now, 2 versions" in run(capsys, "T-1", "SCR")
+    assert "HIST" in run(capsys, "T-1", "HELP") and "HIST does not apply" in failed(capsys, "pat:1", "HIST", "--disclosure", "T-1")
+
+
+@pytest.mark.parametrize("cols", [60, 120])
+def test_news_and_hist_fit_the_terminal(server, capsys, monkeypatch, cols):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setenv("COLUMNS", str(cols))
+    for words in (("feed", "--all"), ("T-1", "HIST")):
+        out = run(capsys, *words)
+        assert max(len(line) for line in out.splitlines()) <= cols

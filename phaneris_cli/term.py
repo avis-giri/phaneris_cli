@@ -24,6 +24,9 @@ CODES = {
     "GRF": ("The neighbourhood in Phaneron, one and two links out", ("disclosure", "record")),
     "OWN": ("Ownership and timeline: filings, grant, assignments, licences, trials, papers; later items as hindsight", ("disclosure", "record")),
     "CLS": ("Patent class trends: filings by year, share in force, owners", ("disclosure", "record", "class")),
+    "HIST": ("Score history: each version's deal chance and recommendation, what moved and why", ("disclosure",)),
+    "WATCH": ("Watch it, or stop watching (a toggle); with no subject, what you watch", ("disclosure", "record", "none")),
+    "NEWS": ("What changed in what you watch, since you last looked", ("disclosure", "record", "none")),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
@@ -373,7 +376,10 @@ def screen_scr(ctx, subject):
     if checks:
         for line in s.wrap("Checks: " + checks).splitlines():
             ctx.p(s.dim(line))
-    ctx.p(s.dim(f"Next: {subject['id']} WHY · CMP · GRF" if s.color else f"Next: {subject['id']} WHY, CMP, GRF"))
+    strip = history_strip(ctx, subject["id"], max(12, min(40, w - 50)))
+    if strip:
+        ctx.p(strip)
+    ctx.p(s.dim(f"Next: {subject['id']} WHY · CMP · HIST" if s.color else f"Next: {subject['id']} WHY, CMP, HIST"))
 
 
 def screen_why(ctx, subject):
@@ -728,10 +734,230 @@ def screen_cls(ctx, subject):
             ctx.p(s.dim(line))
 
 
+# ------------------------------------------------------------------ watching, what changed, score history
+
+
+def _quote(v):
+    from urllib.parse import quote
+
+    return quote(str(v), safe="")
+
+
+def _history(ctx, did, limit=20):
+    return ctx.api.get(f"/disclosures/{_quote(did)}/history?limit={limit}")["history"]
+
+
+def history_strip(ctx, did, width):
+    """SCR's one-line score history: the deal chance of each kept version, oldest to newest. Nothing if the server
+    keeps no history yet."""
+    s = ctx.s
+    try:
+        h = _history(ctx, did, 12)
+    except ApiError:
+        return ""
+    versions = [v for v in reversed(h.get("versions") or []) if v.get("deal_chance") is not None]
+    if not versions:
+        return ""
+    first, last = versions[0], versions[-1]
+    if len(versions) == 1:
+        return s.dim(f"  History: one version, scored {last['scored_at'][:10]}.  HIST for details")
+    values = [v["deal_chance"] for v in versions]
+    spark = draw.sparkline(s, values, min(width, max(4, len(values) * 2)))
+    return f"  History  {spark}  " + s.dim(f"{pct(first['deal_chance'])} on {first['scored_at'][:10]} to {pct(last['deal_chance'])} now, "
+                                            f"{len(versions)} versions.  HIST for details")  # fmt: skip
+
+
+def _move_text(m):
+    v = m.get("from"), m.get("to")
+    if m["what"] == "deal chance":
+        v = pct(v[0]), pct(v[1])
+    elif isinstance(v[0], float) or isinstance(v[1], float):
+        v = tuple("none" if x is None else f"{x:.2f}" for x in v)
+    return f"{m['what']} {v[0]} to {v[1]}"
+
+
+def screen_hist(ctx, subject):
+    s = ctx.s
+    h = _history(ctx, subject["id"])
+    if ctx.out.as_json:
+        return ctx.out.data(h)
+    versions = h.get("versions") or []
+    heading(ctx, subject, "HIST", f"{len(versions)} version{'s' if len(versions) != 1 else ''} kept")
+    if not versions:
+        ctx.p("No scored versions are kept for this disclosure yet.")
+        return
+    values = [v["deal_chance"] for v in reversed(versions) if v.get("deal_chance") is not None]
+    if len(values) > 1:
+        ctx.p(f"  {draw.sparkline(s, values, min(40, len(values) * 3))}  " + s.dim("deal chance, oldest to newest"))
+        ctx.p()
+    ctx.p(s.bold(f"  {'Scored':<11} {'Deal':>7} {'Full':>7}  {'Rec.':<8} {'From':<16} What moved"))
+    for v in versions:
+        source = "data import" if v["source"] == "import" else f"re-score {v.get('job_public_id') or ''}".strip()
+        moves = [_move_text(m) for m in v.get("moved") or []]
+        moved = "; ".join(moves) or s.dim("first kept version" if v is versions[-1] else "nothing")
+        rec = v.get("recommendation") or ""
+        deal, full = pct(v.get("deal_chance")), pct(v.get("full_estimate"))
+        row = f"  {v['scored_at'][:10]:<11} {deal:>7} {full:>7}  {rec:<8} {source[:16]:<16} "
+        if visible_len(row + moved) <= s.width:
+            ctx.p(row + moved)
+        else:  # one move a line under the row, so none is cut
+            ctx.p(row.rstrip())
+            for m in moves:
+                ctx.p(f"      {m}")
+    why = h.get("why")
+    if why:
+        ctx.p()
+        ctx.p(s.bold("Why the latest version moved") + s.dim("   the fitted model's terms in the two latest versions, in log-odds"))
+        if not why.get("available"):
+            ctx.p(s.dim("  Not shown: " + why.get("why_not_available", "not available") + ". Nothing is estimated in its place."))
+        elif not why.get("inputs"):
+            ctx.p(s.dim("  No input of the fitted model changed; the move is in the full estimate's assumed part or the recommendation."))
+        else:
+            changes = why["inputs"][:8]
+            scale = max(abs(c["change"]) for c in changes) or 1
+            label_w = min(42, max(len(c["label"]) for c in changes))
+            bar_w = max(10, min(30, s.width - label_w - 34))
+            for c in changes:
+                label = c["label"] if len(c["label"]) <= label_w else c["label"][: label_w - 1] + "…"
+                was = f"{c['from']:+.2f} to {c['to']:+.2f}"
+                ctx.p(f"  {label.ljust(label_w)} {draw.diverging(s, c['change'], scale, bar_w)} {c['change']:+.2f}  {s.dim(was)}")
+            ctx.p(s.dim(f"  In all {why['log_odds_change']:+.2f} log-odds. {why.get('note', '')}"))
+    ctx.p(s.dim(f"Next: {subject['id']} SCR · WHY · WATCH" if s.color else f"Next: {subject['id']} SCR, WHY, WATCH"))
+
+
+def _target(subject):
+    return subject.get("id") or subject.get("node")
+
+
+def watch_toggle(ctx, subject, on=None):
+    """Watch or stop watching a subject; `on` None toggles. Returns (watching now, the server's answer)."""
+    target = _target(subject)
+    watching = {w["target"] for w in ctx.api.get("/watch").get("watches") or []}
+    if on is None:
+        on = target not in watching
+    if not on:
+        return False, ctx.api.post("/watch/remove", {"target": target})
+    body = {"target": target, "kind": subject["kind"]}
+    if subject["kind"] == "record" and ctx.context:
+        body["disclosure"] = ctx.context
+    return True, ctx.api.post("/watch", body)
+
+
+def screen_watch(ctx, subject):
+    s = ctx.s
+    if subject["kind"] == "none":
+        res = ctx.api.get("/watch")
+        if ctx.out.as_json:
+            return ctx.out.data(res)
+        rows = res.get("watches") or []
+        count = f"{len(rows)} of {res.get('limit', 200)}"
+        ctx.p(f"{s.accent('WATCH')}  {s.bold('What you watch')}  {s.dim(count)}")
+        ctx.p(s.rule())
+        if not rows:
+            ctx.p("Nothing yet. Watch a disclosure or a record: phaneris T-000003 WATCH")
+            return
+        for w in rows:
+            gone = "" if w.get("reachable", True) else s.warn("  no longer within reach")
+            around = f"  around {w['context']}" if w["kind"] == "record" and w.get("context") else ""
+            ctx.p(_fit(s, f"  {w['label'][:48]:<48} {s.dim(w['target'])}{s.dim(around)}{gone}"))
+        ctx.p(s.dim("Changes appear in NEWS (phaneris feed). Stop watching: phaneris ID WATCH --off"))
+        return
+    on = True if ctx.opts.get("on") else False if ctx.opts.get("off") else None
+    watching, res = watch_toggle(ctx, subject, on)
+    if ctx.out.as_json:
+        return ctx.out.data({"watching": watching, **res})
+    name = subject.get("name") or _target(subject)
+    if watching:
+        ctx.p(f"{s.good('Watching')} {name} {s.dim(_target(subject))}. Its changes appear in NEWS.")
+    else:
+        ctx.p(f"Stopped watching {name} {s.dim(_target(subject))}." if res.get("removed") else f"You were not watching {name}.")
+
+
+def open_line(item, event=None):
+    """The screen a feed line opens: a score move opens HIST; a disclosure's graph change, its timeline; a record's,
+    its timeline (a class: its trends), around the disclosure it is watched from."""
+    target = item["target"]
+    if item["kind"] == "disclosure":
+        return f"{target} {'HIST' if event and event['event'] == 'score moved' else 'OWN'}"
+    code = "CLS" if target.startswith("cpc:") else "OWN" if target.startswith("pat:") else "DES"
+    return f"{target} {code}" + (f" --disclosure {item['context']}" if item.get("context") else "")
+
+
+def event_text(s, e):
+    d = e.get("detail") or {}
+    if e["event"] == "score moved":
+        return "score moved: " + "; ".join(_move_text(m) for m in d.get("moves") or [])
+    if d.get("out_of_reach"):
+        return f"{e['event']} {s.dim('(a record outside your reach)')}"
+    if d.get("name") or d.get("record"):
+        return f"{e['event']}: {d.get('name') or d['record']} {s.dim(d.get('record') or '')}".rstrip()
+    if "conveyance" in d:
+        return f"{e['event']}: {d['conveyance']}" + (f" to {d['to']}" if d.get("to") else "") + (f", recorded {d['date']}" if d.get("date") else "")
+    if "field" in d:
+        return f"{e['event']}: {d.get('from') or 'none'} to {d.get('to') or 'none'}"
+    return e["event"]
+
+
+def feed(ctx, subject=None):
+    q = []
+    if subject is not None:
+        q += ["all=1", f"item={_quote(_target(subject))}"]
+    elif ctx.opts.get("all"):
+        q.append("all=1")
+    return ctx.api.get("/feed" + ("?" + "&".join(q) if q else ""))
+
+
+def screen_news(ctx, subject):
+    s = ctx.s
+    one = subject if subject["kind"] != "none" else None
+    res = feed(ctx, one)
+    marking = one is None and not res.get("all")
+    if ctx.out.as_json:
+        if marking:
+            ctx.api.post("/feed/seen", {})
+        return ctx.out.data(res)
+    since = res.get("since")
+    extra = "since you started watching"
+    if res.get("all"):
+        extra = "everything kept"
+    elif since:
+        extra = f"since you last looked, {since[:16].replace('T', ' ')}"
+    if one:
+        heading(ctx, subject, "NEWS", "everything kept")
+    else:
+        ctx.p(f"{s.accent('NEWS')}  {s.bold('What changed')}  {s.dim(extra)}")
+        ctx.p(s.rule())
+    items = res.get("items") or []
+    if not items:
+        watching = len(ctx.api.get("/watch").get("watches") or []) if not one else None
+        if watching == 0:
+            ctx.p("You watch nothing yet. Watch a disclosure or a record: phaneris T-000003 WATCH")
+        else:
+            ctx.p("Nothing new." + ("" if one or res.get("all") else s.dim("  Everything kept: phaneris feed --all")))
+    for item in items:
+        if not one:
+            ctx.p(_fit(s, f"{s.bold(item['label'][:60])}  {s.dim(item['target'])}  {s.dim('open: ' + open_line(item, item['events'][0]))}"))
+        for e in item["events"]:
+            when = e["at"][:10]
+            source = {"graph load": "", "re-score": "re-score", "new data import": "new data"}.get(e.get("source"), "")
+            ctx.p(_fit(s, f"  {s.dim(when)}  {event_text(s, e)}" + (f"  {s.dim(source)}" if source else "")))
+        if not one:
+            ctx.p()
+    if res.get("hidden"):
+        ctx.p(s.dim(f"{res['hidden']} change{'s are' if res['hidden'] != 1 else ' is'} not shown: about items no longer within your reach."))
+    if marking:
+        ctx.api.post("/feed/seen", {})
+        if items:
+            ctx.p(s.dim("Marked as seen. Everything kept: phaneris feed --all"))
+
+
 SCREENS = {
     "DES": screen_des,
     "OWN": screen_own,
     "CLS": screen_cls,
+    "HIST": screen_hist,
+    "WATCH": screen_watch,
+    "NEWS": screen_news,
     "SCR": screen_scr,
     "WHY": screen_why,
     "CMP": screen_cmp,

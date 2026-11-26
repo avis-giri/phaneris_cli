@@ -2,7 +2,7 @@
 
 A command bar on top (the same grammar, with Tab suggestions from your own history), up to four panes with tabs, a
 status line, a help overlay, two themes, an idle lock, and saved layouts. Every pane shows one screen (DES, SCR, WHY,
-CMP, OWN, CLS, GRF, PORT, ASK) drawn for the pane's width from the same server routes as the command line, under the
+CMP, OWN, CLS, HIST, NEWS, GRF, PORT, ASK) drawn for the pane's width from the same server routes as the command line, under the
 same bounds and limits. Needs Textual: `pipx inject phaneris-cli textual`.
 """
 
@@ -92,6 +92,7 @@ class ScreenView(VerticalScroll):
     """One function screen, drawn for this pane's width. Reads once; re-drawing at a new width reads nothing again."""
 
     DEFAULT_CSS = "ScreenView { padding: 0 1; }"
+    BINDINGS = [Binding("w", "watch", "Watch")]
 
     def __init__(self, line, **kw):
         super().__init__(**kw)
@@ -117,6 +118,84 @@ class ScreenView(VerticalScroll):
     def _show(self, text, width):
         self.drawn_width = width + 3
         self.query_one(".body", Static).update(Text.from_ansi(text))
+
+    @work(thread=True, group="watch")
+    def action_watch(self):
+        """w: watch this pane's disclosure or record, or stop watching it. Its changes appear in NEWS."""
+        subject_text, code, opts = term.parse(shlex.split(self.line))
+        ctx = self.app.ctx()
+        if opts.get("disclosure"):
+            ctx.context = opts["disclosure"]
+        try:
+            if not subject_text or code in ("PORT", "NEWS", "WATCH"):
+                raise term_fail()("this pane has no disclosure or record to watch.")
+            subject = term.resolve(ctx, subject_text)
+            if subject["kind"] not in ("disclosure", "record"):
+                raise term_fail()("only a disclosure or a record can be watched.")
+            watching, _ = term.watch_toggle(ctx, subject)
+            name = subject.get("name") or subject_text
+            self.app.call_from_thread(self.app.notify, f"Watching {name}." if watching else f"Stopped watching {name}.")
+        except ApiError as e:
+            self.app.call_from_thread(self.app.notify, e.message, severity="error")
+        except term_fail() as f:
+            self.app.call_from_thread(self.app.notify, f.message, severity="warning")
+
+
+class NewsView(Vertical):
+    """NEWS as a table, newest first: Enter on a line opens its screen (a score move its history, a change its timeline)
+    in a new tab. Showing it marks the feed as seen, as `phaneris feed` does."""
+
+    def __init__(self, line, **kw):
+        super().__init__(**kw)
+        self.line, self.lines = line, {}
+
+    def compose(self) -> ComposeResult:
+        yield Static("", classes="title")
+        yield DataTable(cursor_type="row", zebra_stripes=True)
+
+    def on_mount(self):
+        self.query_one(DataTable).add_columns("When", "Item", "What changed")
+        self.load()
+
+    @work(thread=True)
+    def load(self):
+        ctx = self.app.ctx()
+        ctx.opts = term.parse(shlex.split(self.line))[2]
+        try:
+            res = term.feed(ctx)
+            if not res.get("all"):
+                self.app.api.post("/feed/seen", {})
+        except ApiError as e:
+            self.app.call_from_thread(self.app.notify, e.message, severity="error")
+            return
+        self.app.call_from_thread(self._fill, res)
+
+    def _fill(self, res):
+        s = Style(color=True, theme=self.app.theme_name, truecolor=True)
+        since = res.get("since")
+        extra = "since you started watching"
+        if res.get("all"):
+            extra = "everything kept"
+        elif since:
+            extra = f"since you last looked, {since[:16].replace('T', ' ')}"
+        events = sum(len(i["events"]) for i in res.get("items") or [])
+        note = f"{events} change{'s' if events != 1 else ''}" if events else "nothing new"
+        if res.get("hidden"):
+            note += f", {res['hidden']} not shown (no longer within reach)"
+        self.query_one(".title", Static).update(Text.from_ansi(f"{s.accent('NEWS')}  {s.bold('What changed')}  {s.dim(extra + ', ' + note)}"))
+        table = self.query_one(DataTable)
+        rows = [(e, item) for item in res.get("items") or [] for e in item["events"]]
+        rows.sort(key=lambda r: r[0]["at"], reverse=True)
+        for e, item in rows:
+            key = str(e["id"])
+            self.lines[key] = term.open_line(item, e)
+            what = Text.from_ansi(term.event_text(s, e))
+            table.add_row(e["at"][:10], f"{item['label'][:32]}  {item['target']}", what, key=key)
+
+    def on_data_table_row_selected(self, event):
+        line = self.lines.get(event.row_key.value)
+        if line:
+            self.app.open_tab(line)
 
 
 class BoardView(Vertical):
@@ -407,9 +486,12 @@ HELP_TEXT = """\
 [b]In a map (GRF)[/b]   arrows move, Enter re-centres (one lookup), Backspace goes back,
   d shows the record's brief beside it, o opens it in a new tab.
 [b]On the board (PORT)[/b]   Enter opens the disclosure's scores.
+[b]In NEWS[/b]   Enter opens what changed: a score move its history, anything else its timeline.
+[b]On a disclosure or record[/b]   w watches it, or stops watching it.
 
 Codes: DES what it is · SCR scores · WHY what moves the score · CMP comparables · OWN timeline
        CLS class trends · GRF neighbourhood map · ASK a conversation · PORT office board
+       HIST score history · WATCH watch it · NEWS what changed in what you watch
 
 Press any key to close."""
 
@@ -520,6 +602,8 @@ class PhanerisApp(App):
             self.open_tab(self.start_line)
         elif "default" in read_layouts():
             self.load_layout("default", quiet=True)
+        else:  # the default layout: what changed in what you watch
+            self.open_tab("NEWS")
 
     def panes(self):
         return list(self.query(Pane))
@@ -627,7 +711,8 @@ class PhanerisApp(App):
     def open_tab(self, line, pane=None):
         """Open one screen in a new tab of the pane in focus (or the pane given)."""
         subject, code, _ = term.parse(shlex.split(line))
-        widget = {"PORT": BoardView, "GRF": Walker, "ASK": AskView}.get(code, ScreenView)(line)
+        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, **({"NEWS": NewsView} if not subject else {})}
+        widget = views.get(code, ScreenView)(line)
         self._tab_n += 1
         tab_id = f"tab{self._tab_n}"
         title = f"{subject} {code}".strip() if subject else code

@@ -49,6 +49,12 @@ Questions
   usage                     questions you have left
   buy                       request 100 more questions ($5)
 
+What changed
+  watch add SUBJECT     watch a disclosure, or a record around one (--disclosure ID); up to 200
+  watch remove SUBJECT  stop watching it
+  watch list            what you watch
+  feed [--all]          what changed in what you watch since you last looked (--all: everything kept)
+
 Knowledge graph (Phaneron)
   graph search TEXT --disclosure ID    records around your disclosure that match
   graph record NODE --disclosure ID    one record and what it links to
@@ -61,7 +67,9 @@ Functions: phaneris <SUBJECT> <CODE>, or phaneris go "<SUBJECT> <CODE>"
   WHY   what moves the score    CMP   comparables and how far they got
   GRF   neighbourhood map       ASK   a conversation about it
   OWN   ownership and timeline  CLS   patent class trends
-  PORT  my office's board       HELP  what applies to a subject
+  HIST  score history           NEWS  what changed in what you watch
+  WATCH watch it (a toggle)     PORT  my office's board
+  HELP  what applies to a subject
   Examples: phaneris T-000003 SCR    phaneris "Carl H. June" GRF    phaneris PORT
 
 Options for every command: --json (machine-readable), --no-color, --theme phaneris|amber, --server URL.
@@ -875,6 +883,8 @@ SUBCOMMANDS = (
     "usage",
     "buy",
     "graph",
+    "watch",
+    "feed",
     "go",
 )
 
@@ -917,6 +927,20 @@ def open_tui(args, out, start):
     tui.run(api, args, start)
 
 
+def watch_words(words):
+    """`phaneris watch add|remove|list` and `phaneris feed [--all]`, as the WATCH and NEWS functions."""
+    if words[0] == "feed":
+        return ["NEWS", *words[1:]]
+    sub, rest = (words[1] if len(words) > 1 else "list"), words[2:]
+    if sub == "list":
+        return ["WATCH", *rest]
+    if sub in ("add", "remove"):
+        if not [w for w in rest if not w.startswith("--")]:
+            raise Fail(f"name what to {'watch' if sub == 'add' else 'stop watching'}.", f"phaneris watch {sub} T-000003")
+        return [*rest, "WATCH", "--on" if sub == "add" else "--off"]
+    raise Fail(f'"{sub}" is not a watch command.', "phaneris watch add ID, phaneris watch remove ID, phaneris watch list")
+
+
 def run_functions(argv):
     """`phaneris <SUBJECT> <CODE>`, `phaneris go "<SUBJECT> <CODE>"`, or the command bar with no words."""
     import shlex
@@ -929,6 +953,11 @@ def run_functions(argv):
         words = shlex.split(" ".join(words[1:]))
     if words and words[0] == "tui":
         return open_tui(args, out, " ".join(words[1:]) or None)
+    if words and words[0] in ("watch", "feed"):
+        try:
+            words = watch_words(words)
+        except Fail as f:
+            Fail_and_exit(out, f)
     if not words:
         if sys.stdin.isatty() and sys.stdout.isatty() and not args.json:
             if tui_available():
@@ -954,7 +983,7 @@ def run_functions(argv):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     _, words = global_options(argv)
-    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui"):
+    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui", "watch", "feed"):
         return run_functions(argv)
     args = build_parser().parse_args(argv)
     out = Out(args)

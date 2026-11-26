@@ -55,15 +55,16 @@ def test_the_bar_opens_screens_in_tabs_and_panes(server, capsys, monkeypatch):  
 
     async def go():
         async with app.run_test(size=(140, 45)) as pilot:
+            assert app.query(tui.NewsView)  # with no saved layout, the default opens what changed
             await type_line(pilot, "T-1 SCR")
             await settle(pilot, app)
-            assert "Deal stages" in text_of(app) and len(app.pane().tabs.query("TabPane")) == 1
+            assert "Deal stages" in text_of(app) and len(app.pane().tabs.query("TabPane")) == 2
             await type_line(pilot, "T-1 WHY")
             await settle(pilot, app)
-            assert len(app.pane().tabs.query("TabPane")) == 2
+            assert len(app.pane().tabs.query("TabPane")) == 3
             await pilot.press("ctrl+w")
             await settle(pilot, app)
-            assert len(app.pane().tabs.query("TabPane")) == 1
+            assert len(app.pane().tabs.query("TabPane")) == 2
             await pilot.press("ctrl+n")
             await settle(pilot, app)
             assert len(app.panes()) == 2 and app.focused_pane == 1
@@ -239,5 +240,44 @@ def test_tab_in_the_bar_suggests_from_history(server, capsys, monkeypatch):  # n
             await pilot.press("enter")
             await pilot.pause()
             assert app.query_one("#bar").value == "T-1 SCR"
+
+    run(go())
+
+
+def test_news_pane_opens_each_change_and_marks_the_feed_seen(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 40)) as pilot:
+            await settle(pilot, app)
+            news = app.query_one(tui.NewsView)
+            table = news.query_one(tui.DataTable)
+            assert table.row_count == 3 and "since you last looked" in str(news.query_one(".title").render())
+            assert [x for x in Fake.log if x[1] == "/api/feed/seen"]
+            table.focus()
+            await pilot.press("enter")  # the newest line: a score move opens the history
+            await settle(pilot, app)
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert any("T-1 HIST" in t for t in titles)
+            assert "2 versions kept" in "\n".join(str(v.query_one(".body").render()) for v in app.query(tui.ScreenView))
+
+    run(go())
+
+
+def test_w_watches_the_pane_subject(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+    notes = []
+    monkeypatch.setattr(app, "notify", lambda message, **kw: notes.append(message))
+
+    async def go():
+        async with app.run_test(size=(140, 40)) as pilot:
+            await settle(pilot, app)
+            app.query_one(tui.ScreenView).focus()
+            await pilot.press("w")
+            await settle(pilot, app)
+            assert [x[2] for x in Fake.log if x[1] == "/api/watch" and x[0] == "POST"] == [{"target": "T-1", "kind": "disclosure"}]
+            await pilot.press("w")
+            await settle(pilot, app)
+            assert notes[-2:] == ["Watching Test one.", "Stopped watching Test one."]
 
     run(go())
