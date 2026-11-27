@@ -27,6 +27,7 @@ CODES = {
     "CLS": ("Patent class trends: filings by year, share in force, owners", ("disclosure", "record", "class")),
     "HIST": ("Score history: each version's deal chance and recommendation, what moved and why", ("disclosure",)),
     "REL": ("Related knowledge graph: the records within its reach, grouped by kind", ("disclosure",)),
+    "GRAPH": ("The knowledge graph as nodes and edges around it (in the window: pan, zoom, select, expand)", ("disclosure", "record")),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
@@ -145,7 +146,7 @@ def parse(tokens):
     for t in it:
         if t.startswith("--"):
             key = t[2:]
-            if key in ("sort", "disclosure"):
+            if key in ("sort", "disclosure", "depth", "limit", "rows"):
                 opts[key] = next(it, "")
             else:
                 opts[key] = True
@@ -1074,12 +1075,81 @@ def screen_rel(ctx, subject):
     ctx.p(s.dim(f"Open one: phaneris RECORD DES (or GRF, OWN, CLS), around {subject['id']}. The whole graph: phaneris ask --graph"))
 
 
+def subgraph(ctx, subject, depth=1, limit=None):
+    """The subject's neighbourhood as nodes and edges, within the reach every lookup has. A disclosure scored after
+    the data import has no record of its own in the graph: its related records stand in for it."""
+    node = subject.get("id") if subject["kind"] == "disclosure" else subject.get("node")
+    params = {"node": node, "depth": 2 if str(depth) == "2" else 1, "_bounded": True}
+    if limit:
+        params["limit"] = limit
+    try:
+        sub = ctx.api.get("/graph/subgraph?" + _context_query(ctx, **params))
+    except ApiError as e:
+        if subject["kind"] != "disclosure" or e.status not in (400, 404):
+            raise
+        ids = [r["id"] for g in related(ctx, node)["groups"] for r in g["records"]]
+        sub = subgraph_of(ctx, ids, node, limit)
+        sub["center"] = sub["nodes"][0]["id"] if sub["nodes"] else node
+    return sub
+
+
+def subgraph_of(ctx, ids, disclosure=None, limit=None):
+    """The records an answer cited, their links and their one-step links (within the same reach)."""
+    body = {"nodes": list(ids)[:100]}
+    if disclosure and ctx.role != "admin":
+        body["disclosure"] = disclosure
+    if limit:
+        body["limit"] = limit
+    sub = ctx.api.post("/graph/subgraph", body)
+    sub.setdefault("center", (sub.get("cited") or [None])[0])
+    return sub
+
+
+def graph_footer(s, sub, hidden=()):
+    from . import graphview
+
+    parts = []
+    for kind, n, off in graphview.legend(sub, hidden):
+        glyph = graphview.GLYPH[kind] if s.color else graphview.PLAIN_GLYPH[kind]
+        text = f"{glyph} {kind} {n}" + (" (hidden)" if off else "")
+        parts.append(s.rgb(graphview.kind_rgb(s.theme, kind), text) if s.color else text)
+    line = "  ".join(parts)
+    if sub.get("truncated"):
+        left = ", ".join(f"{n} {k}" for k, n in sorted((sub.get("left_out") or {}).items()))
+        line += s.dim(f"   showing {len(sub['nodes'])} nearest; left out: {left}")
+    return line
+
+
+def screen_graph(ctx, subject):
+    """GRAPH on the command line: the same layout as the window, drawn once on a braille canvas sized to the terminal."""
+    from . import graphview
+
+    s = ctx.s
+    sub = subgraph(ctx, subject, ctx.opts.get("depth") or 1, ctx.opts.get("limit"))
+    if ctx.out.as_json:
+        return ctx.out.data(sub)
+    heading(ctx, subject, "GRAPH", f"{len(sub['nodes'])} records, {len(sub['edges'])} links")
+    if not sub["nodes"]:
+        ctx.p("Nothing in the knowledge graph is linked to it within reach.")
+        return
+    cols = max(40, s.width)
+    rows = int(ctx.opts.get("rows") or max(14, min(40, cols // 3)))
+    pos = graphview.layout(sub["nodes"], sub["edges"], sub.get("center"))
+    cells, _ = graphview.render(sub, pos, cols, rows, s.theme, selected=sub.get("center"), color=s.color)
+    for line in graphview.to_ansi(cells, s):
+        ctx._emit(line)
+    ctx.p(graph_footer(s, sub))
+    ident = subject.get("id") or subject.get("node")
+    ctx.p(s.dim(f"Two links out: phaneris {arg(ident)} GRAPH --depth 2. In the window: pan, zoom, select, expand (phaneris tui {arg(ident)} GRAPH)."))
+
+
 SCREENS = {
     "DES": screen_des,
     "OWN": screen_own,
     "CLS": screen_cls,
     "HIST": screen_hist,
     "REL": screen_rel,
+    "GRAPH": screen_graph,
     "SCR": screen_scr,
     "WHY": screen_why,
     "CMP": screen_cmp,

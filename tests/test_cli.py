@@ -165,6 +165,18 @@ RELATED = {
                                                        "links": 2}]},
     ],
 }  # fmt: skip
+
+
+def SUBGRAPH(center):
+    """A small neighbourhood around any record, as the server's subgraph route answers."""
+    kinds = {"T-1": "disclosure", "inv:a": "person", "pat:2": "patent", "cpc:A01B 1/00": "class", "pat:1": "patent"}
+    ids = [center] + [i for i in ("T-1", "pat:1", "inv:a", "pat:2", "cpc:A01B 1/00") if i != center]
+    nodes = [{"id": i, "kind": kinds.get(i, "patent" if i.startswith("pat:") else "other"), "label": f"Label of {i}", "degree": 2,
+              "depth": 0 if i == center else 1} for i in ids]  # fmt: skip
+    edges = [{"from": center, "to": i, "relation": "linked_to"} for i in ids[1:]] + [{"from": "inv:a", "to": "pat:2", "relation": "invented_by"}]
+    return {"graph": "phaneron", "center": center, "depth": 1, "nodes": nodes, "edges": edges, "truncated": False, "left_out": {}, "limit": 150}
+
+
 HISTORY = {
     "id": "T-1",
     "name": "Test one",
@@ -309,6 +321,10 @@ class Fake(BaseHTTPRequestHandler):
                         {"id": "pat:PCTUS2023082308", "type": "patent", "name": "Ethan Stancliff patent"}]  # fmt: skip
                 hits = [h for h in hits if q["q"].lower() in h["name"].lower()]
                 return self._send(200, {"total": len(hits), "records": hits})
+            if url.path == "/api/graph/subgraph":
+                if q["node"] in ("pat:999999", "far:1"):
+                    return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
+                return self._send(200, SUBGRAPH(q["node"]))
             if url.path == "/api/graph/record":
                 if q["node"] in ("pat:999999", "pat:456788"):
                     return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
@@ -355,6 +371,12 @@ class Fake(BaseHTTPRequestHandler):
             return self._send(200, {"status": "approved", "token": TOKEN} if not Fake.approved else {"status": "pending"})
         if not self._authed():
             return
+        if self.path == "/api/graph/subgraph":
+            if "disclosure" not in body and Fake.role != "admin":
+                return self._send(400, {"error": "Name one of your disclosures.", "code": "disclosure_required"})
+            cited = [n.split(":", 2)[2] if n.startswith("graph:") else n for n in body["nodes"]]
+            sub = SUBGRAPH(cited[0])
+            return self._send(200, {**sub, "cited": cited, "not_in_reach": 0})
         if self.path == "/api/explore":
             if Fake.explore_fail:  # the server's own failures, as it sends them
                 return self._send(*Fake.explore_fail)
@@ -1187,3 +1209,28 @@ def test_out_of_reach_hints_read_plainly(server, capsys, monkeypatch):
     assert 'next: Lookups reach what your disclosure connects to. Or: Ask the whole knowledge graph: phaneris ask --graph "Who or what' in err
     Fake.explore_fail = (503, {"error": "Questions are not switched on yet."})
     assert "Questions are being set up on this site; try again later." in failed(capsys, "ask", "Hi?", "--disclosure", "T-1")
+
+
+def test_graph_in_line_mode_draws_and_gives_json(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "GRAPH")
+    assert "GRAPH  Test one  T-1  5 records, 5 links" in out and "disclosure 1" in out and "patent 2" in out and "--depth 2" in out
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "T-1", "depth": "1", "disclosure": "T-1"}
+    data = json.loads(run(capsys, "--json", "inv:a", "GRAPH", "--depth", "2"))
+    assert data["center"] == "inv:a" and {"nodes", "edges"} <= set(data)
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "inv:a", "depth": "2", "disclosure": "T-1"}  # bounded
+
+
+@pytest.mark.parametrize("cols", [100, 200])
+def test_graph_fits_the_terminal(server, capsys, monkeypatch, cols):
+    signed(server, capsys, monkeypatch)
+    monkeypatch.setenv("COLUMNS", str(cols))
+    out = run(capsys, "T-1", "GRAPH")
+    assert max(len(line) for line in out.splitlines()) <= cols
+
+
+def test_graph_of_a_record_with_no_disclosure_open_is_refused_plainly(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    err = failed(capsys, "inv:a", "GRAPH")
+    assert "Traceback" not in err and "around one of your disclosures" in err
+    assert not [x for x in Fake.log if x[1] == "/api/graph/subgraph"]

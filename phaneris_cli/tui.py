@@ -25,7 +25,7 @@ from textual.suggester import Suggester
 from textual.widgets import DataTable, Input, OptionList, RichLog, Static, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
-from . import __version__, history, idle, store, term
+from . import __version__, graphview, history, idle, store, term
 from .api import ApiError, CachedApi
 from .style import Style, pct
 
@@ -91,9 +91,18 @@ class CommandBar(Input):
 
 
 class ScreenView(VerticalScroll):
-    """One function screen, drawn for this pane's width. Reads once; re-drawing at a new width reads nothing again."""
+    """One function screen, drawn for this pane's width. Reads once; re-drawing at a new width reads nothing again.
+    g opens the node-link graph of its subject."""
 
     DEFAULT_CSS = "ScreenView { padding: 0 1; }"
+    BINDINGS = [Binding("g", "graph", "Graph")]
+
+    def action_graph(self):
+        subject, code, opts = term.parse(shlex.split(self.line))
+        if not subject or code in ("PORT", "HELP"):
+            return self.app.notify("This pane has no disclosure or record to draw.", severity="warning")
+        around = f" --disclosure {term.arg(opts['disclosure'])}" if opts.get("disclosure") else ""
+        self.app.open_tab(f"{term.arg(subject)} GRAPH{around}")
 
     def __init__(self, line, **kw):
         super().__init__(**kw)
@@ -229,8 +238,16 @@ WELCOME = """\
 
 
 class WelcomeView(BoardView):
-    """The window's first pane: what to type, the person's disclosures (PORT, Enter opens one) and their question
-    allowances."""
+    """The window's first pane: what to type, the person's disclosures (PORT, Enter opens one, g its graph) and their
+    question allowances."""
+
+    BINDINGS = [Binding("g", "graph", "Graph of the disclosure")]
+
+    def action_graph(self):
+        table = self.query_one(DataTable)
+        if table.row_count:
+            did = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            self.app.open_tab(f"{term.arg(did)} GRAPH")
 
     def compose(self) -> ComposeResult:
         yield Static(WELCOME, classes="intro")
@@ -256,8 +273,16 @@ class RelatedView(Vertical):
     Enter opens a record (a class in CLS, one of your disclosures in SCR, anything else in DES); g its map, o its
     timeline, c its class trends. Everything stays within the disclosure's reach."""
 
-    BINDINGS = [Binding("g", "open('GRF')", "Map"), Binding("o", "open('OWN')", "Timeline"), Binding("c", "open('CLS')", "Class")]
+    BINDINGS = [Binding("g", "graph", "Graph"), Binding("o", "open('OWN')", "Timeline"), Binding("c", "open('CLS')", "Class")]
     DEFAULT_CSS = "RelatedView Tree { height: 1fr; }"
+
+    def action_graph(self):
+        """g: the node-link graph of the record under the cursor, or of the disclosure itself."""
+        node = self.query_one(Tree).cursor_node
+        if node is not None and node.data:
+            return self._open(node.data, "GRAPH")
+        if self.did:
+            self.app.open_tab(f"{term.arg(self.did)} GRAPH")
 
     def __init__(self, line, **kw):
         super().__init__(**kw)
@@ -333,6 +358,250 @@ class RelatedView(Vertical):
             self._open(node.data, code)
 
 
+class GraphView(Vertical, can_focus=True):
+    """GRAPH in the window: the knowledge graph as nodes and edges (graphview.py), drawn for the pane's size.
+    Arrows pan, + and - zoom, 0 resets, Tab and Shift-Tab move the selection (nearest first), Enter re-centres on it,
+    e expands it one step, f filters kinds (then 1 to 9), l labels, d its brief, o / c / s open OWN / CLS / SCR.
+    A click selects the nearest node. Everything stays within the reach of the disclosure in use (admins: anywhere)."""
+
+    DEFAULT_CSS = """
+    GraphView { padding: 0 1; }
+    GraphView #canvas-row { height: 1fr; }
+    GraphView #canvas { width: 1fr; height: 1fr; }
+    GraphView #side { width: 42; display: none; padding: 0 1; border-left: solid $panel-lighten-2; }
+    GraphView #side.-show { display: block; }
+    GraphView #info { height: auto; max-height: 3; color: $text-muted; }
+    """
+    BINDINGS = [
+        Binding("left", "pan(-1, 0)", show=False), Binding("right", "pan(1, 0)", show=False),
+        Binding("up", "pan(0, -1)", show=False), Binding("down", "pan(0, 1)", show=False),
+        Binding("plus,equals_sign", "zoom(1.25)", "Zoom in", show=False), Binding("minus", "zoom(0.8)", "Zoom out", show=False),
+        Binding("0", "reset", show=False), Binding("tab", "cycle(1)", priority=True, show=False),
+        Binding("shift+tab", "cycle(-1)", priority=True, show=False), Binding("enter", "recentre", show=False),
+        Binding("e", "expand", "Expand"), Binding("f", "filter", "Filter"), Binding("l", "labels", "Labels"),
+        Binding("d", "brief", "Brief"), Binding("o", "open('OWN')", show=False), Binding("c", "open('CLS')", show=False),
+        Binding("s", "open('SCR')", show=False),
+    ] + [Binding(str(i), f"toggle_kind({i})", show=False) for i in range(1, 10)]  # fmt: skip
+
+    def __init__(self, line, cited=None, disclosure=None, **kw):
+        super().__init__(**kw)
+        self.line, self.cited, self.disclosure = line, cited, disclosure
+        self.sub, self.pos, self.at, self.selected = None, {}, {}, None
+        self.view = graphview.View()
+        self.labels, self.hidden, self.filtering = True, set(), False
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="canvas-row"):
+            yield Static("Loading the graph", id="canvas")
+            yield Static("", id="side")
+        yield Static("", id="info")
+
+    def on_mount(self):
+        self.load()
+
+    def ctx(self):
+        ctx = self.app.ctx()
+        if self.disclosure:
+            ctx.context = self.disclosure
+        return ctx
+
+    @work(thread=True, exclusive=True, group="graph")
+    def load(self, node=None):
+        from .main import explain
+
+        ctx = self.ctx()
+        try:
+            if self.cited is not None and node is None:
+                sub = term.subgraph_of(ctx, self.cited, self.disclosure)
+            else:
+                text, _, opts = term.parse(shlex.split(self.line)) if node is None else (node, None, {})
+                if opts.get("disclosure"):
+                    ctx.context = self.disclosure = opts["disclosure"]
+                subject = term.resolve(ctx, text) if node is None else {"kind": "record", "node": node, "name": node}
+                if subject["kind"] == "disclosure":
+                    self.disclosure = self.disclosure or subject["id"]
+                sub = term.subgraph(ctx, subject, opts.get("depth") or 1)
+            self.disclosure = self.disclosure or ctx.context
+        except ApiError as e:
+            f = explain(e)
+            return self.app.call_from_thread(self._message, f.message + (f"  {f.hint}" if f.hint else ""))
+        except term_fail() as f:
+            return self.app.call_from_thread(self._message, f.message)
+        self.app.call_from_thread(self._show, sub)
+
+    def _message(self, text):
+        self.query_one("#canvas", Static).update(Text(text, style="yellow"))
+
+    def _show(self, sub, keep=None):
+        self.sub = sub
+        self.pos = graphview.layout(sub["nodes"], sub["edges"], sub.get("center"), fixed=keep)
+        if keep is None:
+            self.selected = self.anchor = sub.get("center")
+            self.view.reset()
+        self.redraw()
+
+    def on_resize(self, event):
+        self.redraw()
+
+    def redraw(self):
+        if not self.sub:
+            return
+        canvas = self.query_one("#canvas", Static)
+        cols, rows = max(20, canvas.size.width), max(8, canvas.size.height)
+        theme = self.app.theme_name if self.app.theme_name in ("phaneris", "amber") else "phaneris"
+        cells, self.at = graphview.render(self.sub, self.pos, cols, rows, theme, self.view, self.selected, self.labels, self.hidden)
+        canvas.update(cells_text(cells))
+        self.query_one("#info", Static).update(self.info(theme))
+
+    def info(self, theme):
+        s = Style(color=True, theme=theme, truecolor=True)
+        legend = term.graph_footer(s, self.sub, self.hidden)
+        n = self.node(self.selected)
+        sel = f"{n['label']}  ({n['kind']}, {n['id']}, {n.get('degree', 0)} links)" if n else ""
+        keys = "arrows pan  + - zoom  0 reset  Tab next  Enter re-centre  e expand  f filter  l labels  d brief  o c s open"
+        return Text.from_ansi(f"{legend}\n{s.bold(sel)}\n{s.dim(keys)}")
+
+    def node(self, ident):
+        return next((n for n in (self.sub or {}).get("nodes", []) if n["id"] == ident), None)
+
+    # ------------------------------------------------------------ keys
+
+    def action_pan(self, dx, dy):
+        self.view.pan(dx, dy)
+        self.redraw()
+
+    def action_zoom(self, factor):
+        self.view.scale(float(factor))
+        self.redraw()
+
+    def action_reset(self):
+        if self.filtering:
+            return
+        self.view.reset()
+        self.redraw()
+
+    def action_cycle(self, step):
+        if getattr(self, "anchor", None) not in self.at:
+            self.anchor = self.selected
+        self.selected = graphview.nearest(self.at, self.selected, int(step), self.anchor)
+        self.redraw()
+
+    def action_recentre(self):
+        if self.selected and self.selected != (self.sub or {}).get("center"):
+            self.cited = None
+            self.load(self.selected)
+
+    @work(thread=True, exclusive=True, group="graph")
+    def action_expand(self):
+        if not self.selected:
+            return
+        ctx = self.ctx()
+        try:
+            more = term.subgraph(ctx, {"kind": "record", "node": self.selected, "name": self.selected})
+        except ApiError as e:
+            return self.app.call_from_thread(self.app.notify, e.message, severity="warning")
+        merged = graphview.merge(self.sub, more)
+        self.app.call_from_thread(self._show, merged, dict(self.pos))
+
+    def action_filter(self):
+        self.filtering = not self.filtering
+        side = self.query_one("#side", Static)
+        side.set_class(self.filtering, "-show")
+        self._filter_list()
+
+    def _filter_list(self):
+        if not self.filtering or not self.sub:
+            return
+        theme = self.app.theme_name if self.app.theme_name in ("phaneris", "amber") else "phaneris"
+        rows = [Text("Kinds: press a number to show or hide, f to close", style="bold")]
+        for i, (kind, n, off) in enumerate(graphview.legend(self.sub, self.hidden), 1):
+            rgb = graphview.kind_rgb(theme, kind)
+            rows.append(Text.assemble(f"{i}  ", ("[ ] " if off else "[x] "), (graphview.GLYPH[kind], f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"),
+                                      f" {kind} ({n})"))  # fmt: skip
+        self.query_one("#side", Static).update(Text("\n").join(rows))
+
+    def action_toggle_kind(self, number):
+        if not self.filtering or not self.sub:
+            return
+        kinds = [k for k, _, _ in graphview.legend(self.sub, self.hidden)]
+        if 1 <= int(number) <= len(kinds):
+            self.hidden ^= {kinds[int(number) - 1]}
+            self._filter_list()
+            self.redraw()
+
+    def action_labels(self):
+        self.labels = not self.labels
+        self.redraw()
+
+    @work(thread=True)
+    def action_brief(self):
+        if not self.selected:
+            return
+        ctx = self.ctx()
+        try:
+            rec = self.app.api.get("/graph/record?" + term._context_query(ctx, node=self.selected, _bounded=True))
+        except ApiError as e:
+            return self.app.call_from_thread(self.app.notify, e.message, severity="warning")
+        r = rec.get("record") or {}
+        lines = [Text(r.get("name") or self.selected, style="bold"), Text(f"{r.get('type', '')} in {rec.get('graph', '')}", style="dim")]
+        for k, v in list((r.get("fields") or {}).items())[:14]:
+            val = term._value(v)
+            if val is not None and k not in ("type", "label"):
+                lines.append(Text.assemble((k.replace("_", " ") + ": ", "dim"), str(val)[:200]))
+        self.filtering = False
+        self.app.call_from_thread(self._side, Text("\n").join(lines))
+
+    def _side(self, text):
+        side = self.query_one("#side", Static)
+        side.update(text)
+        side.add_class("-show")
+
+    def action_open(self, code):
+        n = self.node(self.selected)
+        if not n:
+            return
+        if code == "SCR" and n["kind"] != "disclosure":
+            return self.app.notify("s opens a disclosure's scores; this is a " + n["kind"] + ".", severity="warning")
+        if code == "CLS" and n["kind"] not in ("class", "patent", "disclosure"):
+            return self.app.notify("c opens patent class trends: for a class, a patent or a disclosure.", severity="warning")
+        ctx = self.ctx()
+        line = f"{term.arg(n['id'])} {code}" if n["kind"] == "disclosure" else term._line(ctx, n["id"], code)
+        self.app.open_tab(line)
+
+    def on_click(self, event):
+        canvas = self.query_one("#canvas", Static)
+        if not self.at:
+            return
+        x, y = event.screen_x - canvas.region.x, event.screen_y - canvas.region.y
+        self.selected = self.anchor = min(self.at, key=lambda i: (self.at[i][0] - y) ** 2 * 4 + (self.at[i][1] - x) ** 2)
+        self.focus()
+        self.redraw()
+
+
+def cells_text(cells):
+    """Canvas rows (char, rgb, bold) as one Rich Text."""
+    out = Text()
+    for r, row in enumerate(cells):
+        if r:
+            out.append("\n")
+        run, key = "", None
+        for ch, rgb, bold in row:
+            k = (rgb, bold)
+            if k != key and run:
+                out.append(run, style=_rich_style(*key))
+                run = ""
+            key = k
+            run += ch
+        if run:
+            out.append(run, style=_rich_style(*key))
+    return out
+
+
+def _rich_style(rgb, bold):
+    style = f"rgb({rgb[0]},{rgb[1]},{rgb[2]})" if rgb else ""
+    return (style + " bold").strip() if bold else style
+
+
 class Walker(Horizontal):
     """GRF you can walk: arrows move between records, Enter re-centres on one (one more lookup), Backspace goes back,
     d shows the record's brief beside the map, o opens it in a new tab."""
@@ -341,7 +610,16 @@ class Walker(Horizontal):
         Binding("backspace", "back", "Back"),
         Binding("d", "brief", "Brief"),
         Binding("o", "open", "Open in a tab"),
+        Binding("g", "graph", "Graph"),
     ]
+
+    def action_graph(self):
+        """g: the record in the middle of the map as a node-link graph."""
+        node = self._selected() or self.center
+        if node:
+            around = f" --disclosure {term.arg(self.context)}" if self.context else ""
+            self.app.open_tab(f"{term.arg(node)} GRAPH{around}")
+
     DEFAULT_CSS = """
     Walker OptionList { width: 1fr; }
     Walker .brief { width: 1fr; display: none; padding: 0 1; border-left: solid $panel-lighten-2; }
@@ -491,7 +769,7 @@ class AskView(Vertical):
     AskView #cited.-show { display: block; }
     AskView Input { dock: bottom; }
     """
-    BINDINGS = [Binding("g", "graph_map", "Open the map", show=False)]
+    BINDINGS = [Binding("g", "graph_map", "Graph of the record", show=False), Binding("G", "graph_all", "Graph of the cited records")]
 
     def __init__(self, line, scope=None, first=None, **kw):
         super().__init__(**kw)
@@ -579,7 +857,9 @@ class AskView(Vertical):
         refs = cited(res)
         self.briefs.update(res.get("entities") or {})
         if refs:
-            self.app.call_from_thread(log.write, Text("Records cited, below: Enter opens one (DES), g its map (GRF).", style="dim"))
+            self.app.call_from_thread(
+                log.write, Text("Records cited, below: Enter opens one (DES), g its graph; G all of them as one graph.", style="dim")
+            )
         self.app.call_from_thread(log.write, Text(quota_line(res.get("quota")), style="dim"))
         self.app.call_from_thread(self._cited, refs)
         self.app.call_from_thread(self.app.refresh_status)
@@ -600,7 +880,15 @@ class AskView(Vertical):
     def action_graph_map(self):
         box = self.query_one("#cited", OptionList)
         if box.has_focus and box.highlighted is not None:
-            self.open_cited(box.get_option_at_index(box.highlighted).id, "GRF")
+            self.open_cited(box.get_option_at_index(box.highlighted).id, "GRAPH")
+
+    def action_graph_all(self):
+        """G: the records the answers cited, as one node-link graph (within reach, like every lookup)."""
+        if not self.cites:
+            return self.app.notify("No records cited yet.", severity="warning")
+        disclosure = (self.scope or {}).get("disclosure") or self.app.ctx().context
+        view = GraphView("GRAPH", cited=list(self.cites), disclosure=disclosure)
+        self.app._add_tab(":graph-cited", "Graph: cited records", view)
 
     @work(thread=True)
     def open_cited(self, cite, code):
@@ -931,6 +1219,8 @@ class PhanerisApp(App):
     def open_tab(self, line, pane=None):
         """Open one screen in a new tab of the pane in focus (or the pane given). ":guide TOPIC" opens the guide,
         ":welcome" the welcome pane, ":askkg QUESTION" asks the whole knowledge graph (chosen from a suggestion)."""
+        if line == ":graph-cited":  # an answer's graph is not kept in a layout: it belongs to its conversation
+            return None
         if line == ":welcome":
             return self._add_tab(line, "Welcome", WelcomeView(line), pane)
         if line.startswith(":askkg "):
@@ -943,7 +1233,7 @@ class PhanerisApp(App):
             topic = line[len(":guide") :].strip()
             return self._add_tab(line, f"Guide {topic}".strip(), GuideView(topic), pane)
         subject, code, _ = term.parse(shlex.split(line))
-        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, "REL": RelatedView}
+        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, "REL": RelatedView, "GRAPH": GraphView}
         widget = views.get(code, ScreenView)(line)
         tab = self._add_tab(line, f"{subject} {code}".strip() if subject else code, widget, pane)
         self._related_beside(subject, code, pane, front=tab)

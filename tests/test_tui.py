@@ -575,8 +575,106 @@ def test_a_disclosure_opens_with_its_related_graph_beside_it(server, capsys, mon
             await settle(pilot, app)
             tree.focus()
             tree.move_cursor(people.children[0])
-            await pilot.press("g")  # the map, still around T-1
+            await pilot.press("g")  # the node-link graph, still around T-1
             await settle(pilot, app)
-            assert [x[2] for x in Fake.log if x[1] == "/api/graph/map"][-1].get("disclosure") == "T-1"
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "inv:a", "depth": "1", "disclosure": "T-1"}
+
+    run(go())
+
+
+def test_graph_view_keys(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 GRAPH")
+
+    async def go():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, app)
+            g = app.query_one(tui.GraphView)
+            assert len(g.at) == 5 and g.selected == "T-1" and "★" in str(g.query_one("#canvas").render())
+            g.focus()
+            await pilot.press("tab")
+            first = g.selected
+            assert first != "T-1"
+            await pilot.press("tab", "tab", "tab", "tab")
+            assert g.selected == "T-1"  # every node once, then back
+            await pilot.press("right", "plus")
+            assert g.view.cx > 0 and g.view.zoom == 1.25
+            await pilot.press("0")
+            assert (g.view.cx, g.view.zoom) == (0.0, 1.0)
+            await pilot.press("l")
+            assert not g.labels
+            await pilot.press("f", "1")  # hide the first kind in the legend
+            assert g.hidden and "Kinds:" in str(g.query_one("#side").render())
+            await pilot.press("f")
+            g.selected = "inv:a"
+            await pilot.press("e")  # expand: merged, existing positions kept
+            await settle(pilot, app)
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "inv:a", "depth": "1", "disclosure": "T-1"}
+            await pilot.press("o")  # its timeline, around T-1
+            await settle(pilot, app)
+            assert any(str(t.label).startswith("inv:a OWN") for t in app.pane().tabs.query("Tab"))
+            app.pane().tabs.active = app._tab_of(g)
+            await settle(pilot, app)
+            g.focus()
+            g.selected = "pat:2"
+            await pilot.press("enter")  # re-centre: a new subgraph around it
+            await settle(pilot, app)
+            assert g.sub["center"] == "pat:2" and g.selected == "pat:2"
+
+    run(go())
+
+
+def test_graph_view_uses_the_space(server, capsys, monkeypatch):  # noqa: F811
+    for size in ((100, 30), (200, 60)):
+        app = make_app(server, capsys, monkeypatch, start="T-1 GRAPH")
+
+        async def go(size=size, app=app):
+            async with app.run_test(size=size) as pilot:
+                await settle(pilot, app)
+                g = app.query_one(tui.GraphView)
+                canvas = g.query_one("#canvas")
+                rows = str(canvas.render()).splitlines()
+                assert len(rows) == canvas.size.height and max(len(r) for r in rows) <= canvas.size.width
+                assert canvas.size.width >= size[0] - 10 and len(g.at) == 5
+
+        run(go())
+
+
+def test_an_answers_cited_records_as_one_graph(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "Who invented it?")
+            await settle(pilot, app)
+            view = app.query_one(tui.AskView)
+            view.query_one("#cited").focus()  # on the cited rows (in the follow-up box, G is just a letter)
+            await pilot.press("G")
+            await settle(pilot, app)
+            sent = [x[2] for x in Fake.log if x[0] == "POST" and x[1] == "/api/graph/subgraph"][-1]
+            assert sent == {"nodes": ["graph:demo:T-1"], "disclosure": "T-1"}  # within the conversation's disclosure
+            g = app.query_one(tui.GraphView)
+            assert g.sub and "T-1" in g.at
+            assert any(str(t.label) == "Graph: cited records" for t in app.pane().tabs.query("Tab"))
+
+    run(go())
+
+
+def test_g_opens_the_graph_from_the_welcome_pane_and_a_screen(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            app.query_one(tui.WelcomeView).query_one(tui.DataTable).focus()
+            await pilot.press("g")
+            await settle(pilot, app)
+            assert any(str(t.label) == "T-1 GRAPH" for t in app.pane().tabs.query("Tab"))
+            app.open_tab("inv:a DES --disclosure T-1")
+            await settle(pilot, app)
+            app.query(tui.ScreenView).last().focus()
+            await pilot.press("g")
+            await settle(pilot, app)
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "inv:a", "depth": "1", "disclosure": "T-1"}
 
     run(go())
