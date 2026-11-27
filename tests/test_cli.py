@@ -324,7 +324,7 @@ class Fake(BaseHTTPRequestHandler):
             if url.path == "/api/graph/subgraph":
                 if q["node"] in ("pat:999999", "far:1"):
                     return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
-                return self._send(200, SUBGRAPH(q["node"]))
+                return self._send(200, {**SUBGRAPH(q["node"]), "depth": int(q.get("depth") or 1)})  # as the server: the depth used
             if url.path == "/api/graph/record":
                 if q["node"] in ("pat:999999", "pat:456788"):
                     return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
@@ -1214,7 +1214,7 @@ def test_out_of_reach_hints_read_plainly(server, capsys, monkeypatch):
 def test_graph_in_line_mode_draws_and_gives_json(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
     out = run(capsys, "T-1", "GRAPH")
-    assert "GRAPH  Test one  T-1  5 records, 5 links" in out and "disclosure 1" in out and "patent 2" in out and "--depth 2" in out
+    assert "GRAPH  Test one  T-1  5 records, 5 links, one link out" in out and "disclosure 1" in out and "patent 2" in out and "--depth 2" in out
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "T-1", "depth": "1", "disclosure": "T-1"}
     data = json.loads(run(capsys, "--json", "inv:a", "GRAPH", "--depth", "2"))
     assert data["center"] == "inv:a" and {"nodes", "edges"} <= set(data)
@@ -1234,3 +1234,20 @@ def test_graph_of_a_record_with_no_disclosure_open_is_refused_plainly(server, ca
     err = failed(capsys, "inv:a", "GRAPH")
     assert "Traceback" not in err and "around one of your disclosures" in err
     assert not [x for x in Fake.log if x[1] == "/api/graph/subgraph"]
+
+
+def test_graph_on_a_person_goes_two_links_out(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    out = run(capsys, "Ada Shared", "GRAPH")  # an inventor: two links out by default, still one lookup
+    assert "two links out" in out and "One link out: phaneris inv:a GRAPH --depth 1" in out
+    sent = [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"]
+    assert sent[-1] == {"node": "inv:a", "depth": "2", "disclosure": "T-1"} and len(sent) == 1
+    run(capsys, "Ada Shared", "GRAPH", "--depth", "1")  # asked for one: one
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1]["depth"] == "1"
+    run(capsys, "pat:2", "GRAPH")  # anything else: one link out
+    assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1]["depth"] == "1"
+    from phaneris_cli import term
+
+    assert term.is_person({"kind": "record", "node": "inventor:5718883-2"}) and term.is_person({"kind": "record", "node": "author:X"})
+    assert not term.is_person({"kind": "disclosure", "id": "T-1"}) and not term.is_person({"kind": "record", "node": "pat:1", "type": "patent"})

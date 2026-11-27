@@ -678,3 +678,20 @@ def test_g_opens_the_graph_from_the_welcome_pane_and_a_screen(server, capsys, mo
             assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1] == {"node": "inv:a", "depth": "1", "disclosure": "T-1"}
 
     run(go())
+
+
+def test_graph_view_on_a_person_says_two_links_out(server, capsys, monkeypatch):  # noqa: F811
+    from phaneris_cli import main as cli_main
+
+    cli_main.remember(last_disclosure="T-1")
+    app = make_app(server, capsys, monkeypatch, start="Ada Shared GRAPH")
+    cli_main.remember(last_disclosure="T-1")
+
+    async def go():
+        async with app.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, app)
+            g = app.query_one(tui.GraphView)
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/subgraph"][-1]["depth"] == "2"
+            assert "Two links out from inv:a" in str(g.query_one("#info").render())
+
+    run(go())

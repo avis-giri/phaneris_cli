@@ -216,10 +216,11 @@ HIST. Every kept version of a disclosure's score: when it was scored, the deal c
         "graph",
         "The knowledge graph view",
         """
-GRAPH draws the knowledge graph around a disclosure, a person, a patent or any record as nodes and edges: each record is a coloured mark by kind (a star for the disclosure, diamonds for patents, dots for people, squares for owners, triangles for classes, crosses for trials, open diamonds for grants, open squares for papers), each link a line of braille dots. The layout is the same every time for the same records, with the subject at the centre. The legend under it counts each kind.
+GRAPH draws the knowledge graph around a disclosure, a person, a patent or any record as nodes and edges: each record is a coloured mark by kind (a star for the disclosure, diamonds for patents, dots for people, squares for owners, triangles for classes, crosses for trials, open diamonds for grants, open squares for papers), each link a line of braille dots. The layout is the same every time for the same records, with the subject at the centre. It shows one link out from the subject, or two for a person (an inventor or author), and the header says which. The legend under it counts each kind.
 
   phaneris T-000003 GRAPH              one link out, drawn once in the terminal
-  phaneris "Carl H. June" GRAPH --depth 2
+  phaneris "Carl H. June" GRAPH        a person: two links out (one is often only their own patents)
+  phaneris T-000003 GRAPH --depth 2    choose: --depth 1 or --depth 2
   phaneris --json T-000003 GRAPH        the nodes and edges as data
 
 In the window it is a pane you can move around: arrows pan, + and - zoom, 0 resets the view, Tab and Shift-Tab move the selection to the next record (nearest first), Enter re-centres on the selected record (a new graph around it), e expands it one more step into the same graph, f filters kinds (then 1 to 9 to show or hide each), l turns labels on or off, d shows the record's brief beside the graph, and o, c, s open its timeline (OWN), class trends (CLS) or scores (SCR) where they apply. A click selects the nearest record. The selected record's links are highlighted with their relation names.

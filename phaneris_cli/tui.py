@@ -417,10 +417,14 @@ class GraphView(Vertical, can_focus=True):
                 text, _, opts = term.parse(shlex.split(self.line)) if node is None else (node, None, {})
                 if opts.get("disclosure"):
                     ctx.context = self.disclosure = opts["disclosure"]
-                subject = term.resolve(ctx, text) if node is None else {"kind": "record", "node": node, "name": node}
+                if node is None:
+                    subject = term.resolve(ctx, text)
+                else:  # re-centred on a record of this graph: its kind says whether it is a person
+                    kind = (self.node(node) or {}).get("kind")
+                    subject = {"kind": "record", "node": node, "name": node, "type": "person" if kind == "person" else kind}
                 if subject["kind"] == "disclosure":
                     self.disclosure = self.disclosure or subject["id"]
-                sub = term.subgraph(ctx, subject, opts.get("depth") or 1)
+                sub = term.subgraph(ctx, subject, opts.get("depth"))
             self.disclosure = self.disclosure or ctx.context
         except ApiError as e:
             f = explain(e)
@@ -458,6 +462,10 @@ class GraphView(Vertical, can_focus=True):
         legend = term.graph_footer(s, self.sub, self.hidden)
         n = self.node(self.selected)
         sel = f"{n['label']}  ({n['kind']}, {n['id']}, {n.get('degree', 0)} links)" if n else ""
+        if self.cited is None:
+            sel = f"{term.depth_words(self.sub.get('depth', 1)).capitalize()} from {self.sub.get('center')}.  {sel}"
+        else:
+            sel = f"The records the answer cited and their links.  {sel}"
         keys = "arrows pan  + - zoom  0 reset  Tab next  Enter re-centre  e expand  f filter  l labels  d brief  o c s open"
         return Text.from_ansi(f"{legend}\n{s.bold(sel)}\n{s.dim(keys)}")
 
@@ -497,7 +505,7 @@ class GraphView(Vertical, can_focus=True):
             return
         ctx = self.ctx()
         try:
-            more = term.subgraph(ctx, {"kind": "record", "node": self.selected, "name": self.selected})
+            more = term.subgraph(ctx, {"kind": "record", "node": self.selected, "name": self.selected}, 1)  # one more step
         except ApiError as e:
             return self.app.call_from_thread(self.app.notify, e.message, severity="warning")
         merged = graphview.merge(self.sub, more)

@@ -1075,10 +1075,26 @@ def screen_rel(ctx, subject):
     ctx.p(s.dim(f"Open one: phaneris RECORD DES (or GRF, OWN, CLS), around {subject['id']}. The whole graph: phaneris ask --graph"))
 
 
-def subgraph(ctx, subject, depth=1, limit=None):
-    """The subject's neighbourhood as nodes and edges, within the reach every lookup has. A disclosure scored after
-    the data import has no record of its own in the graph: its related records stand in for it."""
+PERSON_TYPES = ("inventor", "author", "person")
+
+
+def is_person(subject):
+    """A person (an inventor or author): one link out is often only their own patents, so GRAPH goes two out."""
+    node = str(subject.get("node") or "")
+    return subject["kind"] == "record" and (subject.get("type") in PERSON_TYPES or node.split(":", 1)[0] in ("inventor", "author"))
+
+
+def depth_words(depth):
+    return "two links out" if str(depth) == "2" else "one link out"
+
+
+def subgraph(ctx, subject, depth=None, limit=None):
+    """The subject's neighbourhood as nodes and edges, within the reach every lookup has: one link out, or two for a
+    person, unless a depth is given. A disclosure scored after the data import has no record of its own in the graph:
+    its related records stand in for it."""
     node = subject.get("id") if subject["kind"] == "disclosure" else subject.get("node")
+    if depth is None:
+        depth = 2 if is_person(subject) else 1
     params = {"node": node, "depth": 2 if str(depth) == "2" else 1, "_bounded": True}
     if limit:
         params["limit"] = limit
@@ -1125,10 +1141,10 @@ def screen_graph(ctx, subject):
     from . import graphview
 
     s = ctx.s
-    sub = subgraph(ctx, subject, ctx.opts.get("depth") or 1, ctx.opts.get("limit"))
+    sub = subgraph(ctx, subject, ctx.opts.get("depth"), ctx.opts.get("limit"))
     if ctx.out.as_json:
         return ctx.out.data(sub)
-    heading(ctx, subject, "GRAPH", f"{len(sub['nodes'])} records, {len(sub['edges'])} links")
+    heading(ctx, subject, "GRAPH", f"{len(sub['nodes'])} records, {len(sub['edges'])} links, {depth_words(sub.get('depth', 1))}")
     if not sub["nodes"]:
         ctx.p("Nothing in the knowledge graph is linked to it within reach.")
         return
@@ -1140,7 +1156,9 @@ def screen_graph(ctx, subject):
         ctx._emit(line)
     ctx.p(graph_footer(s, sub))
     ident = subject.get("id") or subject.get("node")
-    ctx.p(s.dim(f"Two links out: phaneris {arg(ident)} GRAPH --depth 2. In the window: pan, zoom, select, expand (phaneris tui {arg(ident)} GRAPH)."))
+    other = 1 if str(sub.get("depth", 1)) == "2" else 2
+    ctx.p(s.dim(f"{depth_words(other).capitalize()}: phaneris {arg(ident)} GRAPH --depth {other}. "
+                f"In the window: pan, zoom, select, expand (phaneris tui {arg(ident)} GRAPH)."))  # fmt: skip
 
 
 SCREENS = {
