@@ -29,6 +29,8 @@ Type `phaneris` and press Enter: the Phaneris window opens, with a bar at the to
   disclosure open", when nothing is sent) before anything is sent. Each scope keeps its own conversation.
 - **A disclosure's related knowledge graph** opens as the next tab whenever you open a disclosure (REL): its records
   grouped by kind with counts, as an expandable tree. Enter opens one; `g` map, `o` timeline, `c` class trends.
+- **The knowledge graph view** (GRAPH, or `g` on any record): nodes and edges you can pan, zoom, select, re-centre and
+  expand; `G` in an answer draws all its cited records. See `phaneris guide graph`.
 - **Cited records** in an answer are rows: Enter opens one (DES), `g` its map (GRF). A record outside your
   disclosures' reach shows the brief the answer returned and says why it cannot be opened further.
 - **A name you cannot reach** offers "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)"
@@ -139,6 +141,7 @@ phaneris go "T-000003 WHY"     # the same, as one line
 | CLS | Patent class trends: filings by year (a braille line chart), share in force, owners. For a disclosure, the class it is grouped under in the graph | a disclosure, a record or a class |
 | HIST | Score history: each kept version's date, deal chance, full estimate and recommendation, what moved, and why the latest moved (the fitted model's terms in the two latest versions) | a disclosure |
 | REL | Related knowledge graph: the records within the disclosure's reach, grouped by kind with counts (`--all` for every one). In the window it opens as the next tab of any disclosure, as an expandable tree | a disclosure |
+| GRAPH | The knowledge graph as nodes and edges around it, on a braille canvas with a legend (`--depth 2`, `--json`). In the window: arrows pan, `+` `-` zoom, Tab selects, Enter re-centres, `e` expands, `f` filters, `d` brief | a disclosure or a record |
 | ASK | A conversation about it | anything |
 | PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
 | HELP | What applies to the subject | anything |

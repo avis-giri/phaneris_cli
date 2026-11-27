@@ -119,3 +119,11 @@ def test_rel_and_the_question_messages_are_in_the_guide():
     body = text()
     assert "REL. A disclosure's related knowledge graph" in body and "Administrators see the same view" in body
     assert "asked before a question is spent" in body and "Nothing was counted" in body
+
+
+def test_the_graph_view_is_in_the_guide():
+    body = guide.SLUGS["graph"][1]
+    for must in ("phaneris T-000003 GRAPH", "--depth 2", "arrows pan", "+ and - zoom", "Tab and Shift-Tab", "e expands", "f filters",
+                 "150 records", "300 at most", "one lookup", "never another institution's disclosures", "G (with the cited records"):  # fmt: skip
+        assert must in body, must
+    assert guide.find("graph") == "graph" and guide.find("GRAPH") == "graph"

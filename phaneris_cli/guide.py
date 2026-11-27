@@ -48,7 +48,7 @@ The scope chip beside the bar shows where Enter will send a question before anyt
 
 Open a disclosure (from the bar or the board) and its related knowledge graph opens as the next tab: its records, grouped by kind with counts, as an expandable tree. See: phaneris guide screens (REL).
 
-An answer lists the records it cites as rows: Enter opens one (DES), g opens its map (GRF). Administrators can open any of them. Everyone else can open a record within reach of one of their disclosures; for any other, the window shows the brief the answer returned and says why it cannot be opened further.
+An answer lists the records it cites as rows: Enter opens one (DES), g draws its knowledge graph, G draws all the cited records as one graph (see phaneris guide graph). Administrators can open any of them. Everyone else can open a record within reach of one of their disclosures; for any other, the window shows the brief the answer returned and says why it cannot be opened further.
 
 A name you cannot reach is never a dead end: the first suggestion is "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)". It is sent only when you choose it and press Enter.
 
@@ -172,11 +172,12 @@ The codes:
   CLS    patent class trends                                 phaneris A61K CLS
   HIST   score history: versions, what moved and why         phaneris T-000003 HIST
   REL    related knowledge graph: its records, by kind       phaneris T-000003 REL
+  GRAPH  the knowledge graph as nodes and edges              phaneris "Carl H. June" GRAPH
   ASK    a conversation about it                             phaneris T-000003 ASK
   PORT   your office's board                                 phaneris PORT
   HELP   what applies to a subject                           phaneris T-000003 HELP
 
-DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP, HIST and REL to a disclosure; CLS also to a class; PORT to your office.
+DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP, HIST and REL to a disclosure; GRAPH to a disclosure or a record; CLS also to a class; PORT to your office.
 """,
     ),
     (
@@ -209,6 +210,23 @@ PORT. Your office's disclosures ranked by deal chance, with the recommendation, 
 REL. A disclosure's related knowledge graph: the records within its reach (the same reach as every lookup about it), grouped by kind with counts: patents, people, owners, classes, trials, grants, papers and your other disclosures, each with how many links it is from the disclosure. Administrators see the same view, so it reads the same for everyone; the whole graph is the /kg question. In the window it opens as the next tab whenever a disclosure is opened, as an expandable tree: Enter opens a record (a class in CLS, one of your disclosures in SCR, anything else in DES), g its map, o its timeline, c its class trends, all within the disclosure's reach.
 
 HIST. Every kept version of a disclosure's score: when it was scored, the deal chance, the full estimate, the recommendation, where it came from (a data import or a re-score) and what moved. Under it, why the latest version moved: the change in each fitted input's push between the two latest versions, shown only when both were scored with the model the site holds.
+""",
+    ),
+    (
+        "graph",
+        "The knowledge graph view",
+        """
+GRAPH draws the knowledge graph around a disclosure, a person, a patent or any record as nodes and edges: each record is a coloured mark by kind (a star for the disclosure, diamonds for patents, dots for people, squares for owners, triangles for classes, crosses for trials, open diamonds for grants, open squares for papers), each link a line of braille dots. The layout is the same every time for the same records, with the subject at the centre. The legend under it counts each kind.
+
+  phaneris T-000003 GRAPH              one link out, drawn once in the terminal
+  phaneris "Carl H. June" GRAPH --depth 2
+  phaneris --json T-000003 GRAPH        the nodes and edges as data
+
+In the window it is a pane you can move around: arrows pan, + and - zoom, 0 resets the view, Tab and Shift-Tab move the selection to the next record (nearest first), Enter re-centres on the selected record (a new graph around it), e expands it one more step into the same graph, f filters kinds (then 1 to 9 to show or hide each), l turns labels on or off, d shows the record's brief beside the graph, and o, c, s open its timeline (OWN), class trends (CLS) or scores (SCR) where they apply. A click selects the nearest record. The selected record's links are highlighted with their relation names.
+
+g opens the graph from anywhere: on a record in REL or in an answer's cited records, on a disclosure on the welcome pane, on any screen of a record or disclosure, and in the GRF map. In an answer, G (with the cited records in focus) draws all the records the answer cited, their links and their one-step links.
+
+Who sees what: office users and developers see only what the disclosure in use connects to, exactly as every lookup, never another institution's disclosures; administrators see the whole graph. A graph shows at most 150 records by default (300 at most, the nearest and best-connected first) and says how many of each kind it left out. Each graph, re-centre or expansion is one lookup (300 an hour). The whole graph is the /kg question.
 """,
     ),
     (
@@ -331,6 +349,9 @@ ALIASES = {
     "inferred": "screens",
     "limits": "questions",
     "kg": "window",
+    "nodes": "graph",
+    "edges": "graph",
+    "map": "graph",
     "ask": "window",
     "scope": "window",
     "phaneris": "window",
