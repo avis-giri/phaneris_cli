@@ -516,6 +516,21 @@ def test_ask_on_a_record_with_no_disclosure_open_sends_nothing(server, capsys, m
     run(go())
 
 
+def test_developers_get_no_automatic_related_tab(server, capsys, monkeypatch):  # noqa: F811
+    Fake.role = "staff"  # developers may open other people's disclosures, where REL would only show an error
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "T-1 SCR")
+            await settle(pilot, app)
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert "T-1 SCR" in titles and not any(t.endswith("REL") for t in titles)
+
+    asyncio.run(go())
+
+
 def test_a_disclosure_opens_with_its_related_graph_beside_it(server, capsys, monkeypatch):  # noqa: F811
     app = make_app(server, capsys, monkeypatch)
 

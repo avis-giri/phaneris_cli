@@ -953,6 +953,8 @@ class PhanerisApp(App):
         """A disclosure opened in the window gets its related knowledge graph as the next tab (once per disclosure)."""
         if not subject or code in ("REL", "ASK", "PORT"):
             return
+        if self.ctx().role == "staff":  # developers: no automatic REL tab (they may open others' disclosures); type ID REL for it
+            return
         did = self.disclosure_ids.get(subject.lower()) or (subject if code in ("SCR", "WHY", "CMP", "HIST") else None)
         if not did:
             return
