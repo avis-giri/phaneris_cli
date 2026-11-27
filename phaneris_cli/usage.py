@@ -66,7 +66,7 @@ def statement(s, u):
         b = u["bought"]
         lines += prose(f"Bought questions left: {b['balance']}  ({b['bought_total']} added in all, {b['used']} used)")
         if u.get("pack_request"):
-            day = u["pack_request"]["requested_at"][:10]
+            day = datetime.datetime.fromisoformat(u["pack_request"]["requested_at"]).astimezone().strftime("%b %d, %Y")
             lines += prose(
                 f"A pack of {b['pack']['questions']} (${b['pack']['price_usd']}) was requested on {day}; "
                 "an administrator adds it until online payment opens.",
