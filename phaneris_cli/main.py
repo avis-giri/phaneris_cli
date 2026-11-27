@@ -146,7 +146,7 @@ def explain(e):
     if e.status == 0:
         return Fail(e.message, "Check your network, then run: phaneris doctor")
     if e.status == 401 and e.code == "idle_signed_out":
-        return Fail(e.message, "Run: phaneris login")
+        return Fail(e.message, None if "phaneris login" in e.message else "Run: phaneris login")
     if e.status == 401:
         return Fail(e.message, "Your sign-in may have ended. Run: phaneris login")
     if e.status == 503 and "not switched on" in e.message:
