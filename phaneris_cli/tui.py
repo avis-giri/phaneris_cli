@@ -1044,7 +1044,7 @@ class PhanerisApp(App):
     #bar { margin: 0 0 0 1; width: 1fr; }
     #scope { width: auto; height: 3; padding: 1 1; margin: 0 1 0 0; background: $panel; color: $text; }
     #scope.-graph { background: $accent; color: $text; }
-    WelcomeView .greeting { padding: 0 1; }
+    WelcomeView .greeting { padding: 0 1 1 1; }
     WelcomeView .intro { padding: 0 1; }
     WelcomeView .allowances { padding: 0 1 1 1; color: $text-muted; }
     #suggest { display: none; height: auto; max-height: 12; margin: 0 1; }
@@ -1298,7 +1298,21 @@ class PhanerisApp(App):
         target.tabs.add_pane(TabPane(title[:28], widget, id=tab_id))
         if activate:
             target.tabs.active = tab_id
+            self.call_after_refresh(self._focus_into, target, tab_id, widget)
         return tab_id
+
+    def _focus_into(self, target, tab_id, widget):
+        """Keyboard focus follows a new tab: left on a widget in another tab, it would bring that tab back to the front."""
+        if not target.tabs.query(f"#{tab_id}"):
+            return
+        target.tabs.active = tab_id
+        if self.focused is not None and self.query_one("#bar").has_focus:
+            return  # typing in the bar: stay there
+        first = widget if widget.can_focus else next((w for w in widget.walk_children() if w.can_focus), None)
+        if first is not None:
+            first.focus()
+        else:
+            self.screen.set_focus(None)
 
     def action_focus_bar(self):
         self.query_one("#bar").focus()
@@ -1556,7 +1570,12 @@ class PhanerisApp(App):
         try:
             me = self.api.get("/auth/me", background=True)["user"]
             parts.append(f"{me['display_name']} ({me['role']})")
-            parts.append(f"office {me['workspace']}")
+            if not getattr(self, "office_names", None):
+                try:
+                    self.office_names = {w["id"]: w["name"] for w in self.api.get("/workspaces", background=True).get("workspaces") or []}
+                except ApiError:
+                    self.office_names = {}
+            parts.append(self.office_names.get(me["workspace"], f"office {me['workspace']}"))
         except ApiError as e:
             parts.append(e.message)
         try:

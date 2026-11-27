@@ -214,7 +214,7 @@ def test_help_status_and_amber(server, capsys, monkeypatch):  # noqa: F811
         async with app.run_test(size=(120, 40)) as pilot:
             await settle(pilot, app)
             status = str(app.query_one("#status").render())
-            assert "Pat (client)" in status and "office aldermoor" in status
+            assert "Pat (client)" in status and "Aldermoor" in status
             assert "Questions: 9 of 10 free about disclosures, 4 of 5 whole graph, 0 bought" in status and "server abc1234" in status
             assert app.has_class("amber")
             app.screen.set_focus(None)  # not typing in the bar
@@ -705,5 +705,21 @@ def test_the_window_greets_like_the_welcome(server, capsys, monkeypatch):  # noq
             await settle(pilot, app)
             greeting = str(app.query_one(tui.WelcomeView).query_one(".greeting").render())
             assert greeting == "Welcome back, Pat.  Aldermoor · Office user · 2 disclosures"
+
+    run(go())
+
+
+def test_a_new_tab_comes_to_the_front_even_with_focus_elsewhere(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch, start="T-1 SCR")
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            await type_line(pilot, "/kg Who owns it?")
+            await settle(pilot, app)
+            app.query_one(tui.AskView).query_one("#cited").focus()  # focus inside the conversation
+            await pilot.press("f2")
+            await settle(pilot, app)
+            assert app.tab_lines[app.pane().tabs.active] == "USAGE"
 
     run(go())
