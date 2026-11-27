@@ -28,6 +28,7 @@ from textual.widgets.option_list import Option
 from . import __version__, graphview, history, idle, store, term
 from .api import ApiError, CachedApi
 from .style import Style, pct
+from .usage import notice as usage_notice
 
 MAX_PANES = 4
 STATUS_SECONDS = 60
@@ -233,7 +234,8 @@ WELCOME = """\
   [b]Ask[/b]             a question ending in ?, or ask ...    about the disclosure that is open
                   /kg QUESTION or Ctrl-G                 across the whole knowledge graph
                   the chip beside the bar shows which one Enter will use, before anything is sent
-  [b]Tab[/b] completes from what you ran before    [b]?[/b] help    [b]? TOPIC[/b] the guide    [b]Ctrl-B[/b] buy 100 questions ($5)
+  [b]Tab[/b] completes from what you ran before    [b]?[/b] help    [b]? TOPIC[/b] the guide
+  [b]F2[/b] your usage and limits    [b]Ctrl-B[/b] buy 100 questions ($5)
 """
 
 
@@ -264,7 +266,11 @@ class WelcomeView(BoardView):
             usage = self.app.api.get("/explore/usage")
         except ApiError:
             return
-        line = "  " + term.allowances_line(usage) + ".  Buying more: Ctrl-B or phaneris buy."
+        line = "  " + term.allowances_line(usage) + ".  Details: F2.  Buying more: Ctrl-B or phaneris buy."
+        for kind in ("disclosure", "graph"):  # nearly or fully used free questions: say so here too
+            warn = usage_notice(usage.get("graph_quota" if kind == "graph" else "quota") or {"unlimited": True})
+            if warn:
+                line += "\n  [b]" + warn + "[/b]"
         self.app.call_from_thread(self.query_one(".allowances", Static).update, line)
 
 
@@ -869,6 +875,9 @@ class AskView(Vertical):
                 log.write, Text("Records cited, below: Enter opens one (DES), g its graph; G all of them as one graph.", style="dim")
             )
         self.app.call_from_thread(log.write, Text(quota_line(res.get("quota")), style="dim"))
+        warn = usage_notice(res.get("quota") or {"unlimited": True})
+        if warn:
+            self.app.call_from_thread(log.write, Text(warn + "  F2: usage and limits.", style="bold yellow"))
         self.app.call_from_thread(self._cited, refs)
         self.app.call_from_thread(self.app.refresh_status)
 
@@ -971,7 +980,8 @@ HELP_TEXT = """\
   [  ]              previous, next tab      ctrl+w          close the tab
   <  >              narrow, widen the pane  ctrl+x          close the pane
   ctrl+s            save this layout        ?  f1           this help
-  ctrl+q            leave
+  f2                usage and limits        ctrl+b (twice)  buy 100 questions ($5)
+  ctrl+g            whole-graph questions   ctrl+q          leave
 
 [b]In a map (GRF)[/b]   arrows move, Enter re-centres (one lookup), Backspace goes back,
   d shows the record's brief beside it, o opens it in a new tab.
@@ -979,7 +989,7 @@ HELP_TEXT = """\
 
 Codes: DES what it is · SCR scores · WHY what moves the score · CMP comparables · OWN timeline
        CLS class trends · GRF neighbourhood map · ASK a conversation · PORT office board
-       HIST score history
+       HIST score history · USAGE your plan and limits
 
 Press any key to close."""
 
@@ -1056,6 +1066,7 @@ class PhanerisApp(App):
         Binding("ctrl+s", "save_layout", "Save layout", priority=True),
         Binding("ctrl+g", "whole_graph", "Whole graph", priority=True),
         Binding("ctrl+b", "buy", "Buy questions", priority=True),
+        Binding("f2", "usage", "Usage and limits", priority=True),
         Binding("ctrl+q", "quit", "Leave", priority=True),
         Binding("escape", "hide_suggestions", show=False),
     ]
@@ -1464,6 +1475,14 @@ class PhanerisApp(App):
         if event.input.id == "bar":
             self.update_scope()
 
+    def action_usage(self):
+        """F2: your plan and limits in a tab (once; F2 again brings it to the front)."""
+        for tab, line in self.tab_lines.items():
+            if line == "USAGE":
+                self.pane().tabs.active = tab
+                return
+        self.open_tab("USAGE")
+
     def action_whole_graph(self):
         self.graph_mode = not self.graph_mode
         self.update_scope()
@@ -1543,7 +1562,7 @@ class PhanerisApp(App):
         self.server_down = v is None
         if v is None and parts and parts[0].startswith("Could not reach"):
             parts[0] = "server not answering"
-        parts.append(f"server {v or 'not answering'} · phaneris {__version__} · ? help")
+        parts.append(f"server {v or 'not answering'} · phaneris {__version__} · F2 usage · ? help")
         self.call_from_thread(self._set_status, "  ·  ".join(parts))
 
     def _set_status(self, text):

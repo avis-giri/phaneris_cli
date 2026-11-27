@@ -17,6 +17,7 @@ import webbrowser
 from urllib.parse import quote
 
 from . import __version__, store
+from . import usage as usage_view
 from .api import Api, ApiError
 from .style import Style, pct
 
@@ -718,6 +719,9 @@ def print_answer(res, out, keep_cites):
             print(s.dim(f"  and {len(refs) - 8} more"))
     print()
     print(s.dim(quota_line(res.get("quota"))))
+    warn = usage_view.notice(res.get("quota") or {"unlimited": True})
+    if warn:
+        print(s.warn(warn))
 
 
 @api_errors
@@ -765,19 +769,10 @@ def ask_loop(api, scope, about, args, out):
 
 @api_errors
 def cmd_usage(args, out):
+    """Your plan, every limit with what is used and when it opens again, bought questions and the last 30 days."""
     api = signed_in(args)
-    u = api.get("/explore/usage")
-    s = out.s
-
-    def text():
-        print(quota_line(u.get("quota")))
-        print(quota_line(u.get("graph_quota")))
-        if u.get("pack_requested"):
-            print(s.dim("A pack of 100 questions ($5) is requested and waiting to be added."))
-        elif not (u.get("quota") or {}).get("unlimited"):
-            print(s.dim("More questions: phaneris buy  (100 for $5)"))
-
-    out.data(u, text)
+    u = api.get("/account/usage")
+    out.data(u, lambda: print("\n".join(out.s.line(x) for x in usage_view.statement(out.s, u))))
 
 
 @api_errors
@@ -917,7 +912,7 @@ def build_parser():
     s.add_argument("-i", "--interactive", action="store_true", help="a conversation that keeps your earlier questions")
     s.add_argument("--cites", action="store_true", help="keep the record tags in the answer")
     s.set_defaults(fn=cmd_ask)
-    sub.add_parser("usage", help="questions left").set_defaults(fn=cmd_usage)
+    sub.add_parser("usage", help="your plan, limits, bought questions and recent use").set_defaults(fn=cmd_usage)
     sub.add_parser("buy", help="request 100 more questions ($5)").set_defaults(fn=cmd_buy)
 
     s = sub.add_parser("graph", help="look records up in the knowledge graph around your disclosure")

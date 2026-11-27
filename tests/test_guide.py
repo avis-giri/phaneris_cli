@@ -12,7 +12,7 @@ from phaneris_cli import main as cli
 
 # Facts the guide shares with the website's docs page (tests/test_docs_pages.py in the service checks the same list).
 SHARED_FACTS = ("10 free in any 12 hours", "5 free in total", "100 for $5", "300 an hour", "30 days", "15 minutes", "Codes last 10 minutes",
-                "0.5 is the middle")  # fmt: skip
+                "0.5 is the middle", "25 a day", "2,000 for administrators", "These do not renew")  # fmt: skip
 
 
 def text():

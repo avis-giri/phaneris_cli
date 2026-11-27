@@ -175,9 +175,10 @@ The codes:
   GRAPH  the knowledge graph as nodes and edges              phaneris "Carl H. June" GRAPH
   ASK    a conversation about it                             phaneris T-000003 ASK
   PORT   your office's board                                 phaneris PORT
+  USAGE  your plan and limits, bought questions        phaneris USAGE
   HELP   what applies to a subject                           phaneris T-000003 HELP
 
-DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP, HIST and REL to a disclosure; GRAPH to a disclosure or a record; CLS also to a class; PORT to your office.
+DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP, HIST and REL to a disclosure; GRAPH to a disclosure or a record; CLS also to a class; PORT and USAGE to you and your office.
 """,
     ),
     (
@@ -246,6 +247,25 @@ There are two kinds of question. The service decides every limit; the command li
 A question the answer service could not answer does not count. phaneris usage shows what you have left. phaneris buy records a request for 100 more; until online payment opens, an administrator adds them and marks the request filled. Bought questions do not expire.
 
 Lookups (graph commands, DES, GRF, OWN, CLS on records, did-you-mean, opening a cited record) reach only what your disclosure connects to: the disclosure, its patents and the records within two links of them, never another institution's disclosures. Office users and developers stay inside the named disclosure's neighbourhood. Administrators read every graph, whole, even when they name a disclosure, and may leave the disclosure out. Lookups are limited to 300 an hour per person, to keep the graph from being copied in bulk.
+""",
+    ),
+    (
+        "usage",
+        "Usage and limits",
+        """
+phaneris usage (or USAGE in the bar, or F2 in the window) shows your plan and every limit: what is used, what is left, when it opens again, your bought questions, any pack you have requested, and your questions over the last 30 days. The console shows the same on its Usage and limits page. --json gives the same numbers for scripts.
+
+  Questions about your disclosures       10 free in any 12 hours. The oldest one makes room again when it is 12 hours old.
+  Questions across the whole graph       5 free in total. These do not renew.
+  Bought questions                       used after the free ones, for both kinds: 100 for $5. They do not expire.
+  Knowledge graph lookups                300 an hour (2,000 for administrators).
+  New disclosures scored                 25 a day.
+  Sign-in                                ends after 2 minutes without use; a terminal sign-in lasts at most 30 days.
+  Administrators                         no limit on questions.
+
+A question the answer service could not answer is not counted. When 80% of a kind of free question is used, and when it is used up, a short notice says so after each answer, on the welcome pane and in the console's question panel.
+
+Buying: phaneris buy, or Ctrl-B twice in the window, or Buy 100 questions in the console, records a request. Online payment is not open yet; an administrator adds the 100 questions and your request is marked filled. Nothing is charged from the terminal.
 """,
     ),
     (
@@ -348,7 +368,10 @@ ALIASES = {
     "scores": "screens",
     "real": "screens",
     "inferred": "screens",
-    "limits": "questions",
+    "limits": "usage",
+    "plan": "usage",
+    "buy": "usage",
+    "billing": "usage",
     "kg": "window",
     "nodes": "graph",
     "edges": "graph",
@@ -367,6 +390,7 @@ ALIASES = {
 }
 for _code in ("scr", "why", "cmp", "grf", "own", "cls", "port", "hist"):
     ALIASES.setdefault(_code, "screens")
+ALIASES["usage-code"] = "usage"
 
 
 def find(name):

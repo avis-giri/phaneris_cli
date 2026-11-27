@@ -201,7 +201,47 @@ SUGGEST = {
 }  # fmt: skip
 
 
+def _account_usage():
+    """What /api/account/usage answers for the fake person, from Fake.quota and Fake.graph_left."""
+    q = Fake.quota
+    admin = Fake.role == "admin" or q.get("unlimited")
+    days = [{"date": f"2026-11-{d:02d}", "disclosure": d % 3, "graph": 1 if d % 7 == 0 else 0, "bought": 0} for d in range(1, 31)]
+
+    def m(key, label, used, limit, window, resets=None):
+        share = None if admin and key.endswith("questions") else round(used / limit, 3)
+        state = "unlimited" if share is None else "empty" if used >= limit else "low" if share >= 0.8 else "ok"
+        bounded = share is not None
+        return {"key": key, "label": label, "used": used, "limit": limit if bounded else None, "remaining": limit - used if bounded else None,
+                "unlimited": not bounded, "window": window, "resets_at": resets, "share_used": share, "state": state, "note": ""}  # fmt: skip
+
+    lim = q.get("limit", 10)
+    return {
+        "plan": "Admin, no limits" if admin else ("Free plus bought questions" if q.get("credits") else "Free"),
+        "admin": bool(admin),
+        "meters": [
+            m("disclosure_questions", "Questions about your disclosures", lim - q.get("free_left", lim), lim, "free, any 12 hours", q.get("next_at")),
+            m("graph_questions", "Questions across the whole knowledge graph", 5 - Fake.graph_left, 5, "free, in total"),
+            m("lookups", "Knowledge graph lookups (terminal)", 12, 300, "per hour", "2026-11-26T18:00:00+00:00"),
+            m("new_disclosures", "New disclosures scored", 1, 25, "per day", "2026-11-27T09:00:00+00:00"),
+        ],
+        "bought": {
+            "balance": q.get("credits", 0),
+            "bought_total": q.get("credits", 0),
+            "used": 0,
+            "pack": {"questions": 100, "price_usd": 5},
+            "online_payment": False,
+            "history": [],
+        },  # fmt: skip
+        "pack_request": None,
+        "history": days,
+        "history_days": 30,
+        "sign_in": {"idle_minutes": 2, "terminal_sign_in_days": 30},
+        "rules": ["Questions about your disclosures: 10 free in any 12 hours."],
+    }
+
+
 class Fake(BaseHTTPRequestHandler):
+    account_usage = staticmethod(_account_usage)
     log = []
     background = []
     graph_left = 4
@@ -282,6 +322,8 @@ class Fake(BaseHTTPRequestHandler):
             if q.get("node") == "far:1":
                 return self._send(404, {"error": "That record is not within reach of this disclosure.", "code": "out_of_reach"})
             return self._send(200, {**MAP, "center": {**MAP["center"], "id": q.get("node", "inv:a")}})
+        if url.path == "/api/account/usage":
+            return self._send(200, Fake.account_usage())
         if url.path == "/api/explore/usage":
             return self._send(
                 200,

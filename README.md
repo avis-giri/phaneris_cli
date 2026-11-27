@@ -109,7 +109,7 @@ Settings page.
 | `phaneris ask "question" [--disclosure ID]` | Ask about one of your disclosures (default: the last one you used) |
 | `phaneris ask "question" --graph` | Ask across the whole knowledge graph (metered) |
 | `phaneris ask -i` | A conversation that keeps your earlier questions |
-| `phaneris usage` / `buy` | Questions you have left; request 100 more for $5 |
+| `phaneris usage` / `buy` | Your plan and every limit (used, left, when it opens again), bought questions, last 30 days; request 100 more for $5 |
 | `phaneris graph search TEXT [--disclosure ID]` | Records around your disclosure that match |
 | `phaneris graph record NODE [--disclosure ID]` | One record, with a short claim excerpt for a patent |
 | `phaneris graph related NODE [--disclosure ID]` | The records one step from it |
@@ -216,6 +216,24 @@ screen locks until a key is pressed; your password is never asked for or kept.
 
 `--theme phaneris` (the default: the site's violet accent) or `--theme amber` (amber on black, high contrast), or set
 `PHANERIS_THEME`. Color appears only on a terminal and never with `NO_COLOR`; screens fit the terminal's width.
+
+## Usage and limits
+
+`phaneris usage`, `USAGE` in the bar, or F2 in the window shows your plan and limits; the console has the same on its
+Usage and limits page.
+
+| Limit | Amount |
+| --- | --- |
+| Questions about your disclosures | 10 free in any 12 hours |
+| Questions across the whole knowledge graph | 5 free in total (these do not renew) |
+| Bought questions | used after the free ones, for both kinds: 100 for $5; they do not expire |
+| Knowledge graph lookups | 300 an hour (2,000 for administrators) |
+| New disclosures scored | 25 a day |
+| Sign-in | ends after 2 minutes without use; terminal sign-ins last at most 30 days |
+| Administrators | no limit on questions |
+
+At 80% of a kind of free question, and when it is used up, a short notice says so after each answer. `phaneris buy`
+records a request for 100 questions; until online payment opens, an administrator adds them.
 
 ## What you can reach
 

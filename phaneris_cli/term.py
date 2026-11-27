@@ -30,6 +30,7 @@ CODES = {
     "GRAPH": ("The knowledge graph as nodes and edges around it (in the window: pan, zoom, select, expand)", ("disclosure", "record")),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
+    "USAGE": ("My plan and limits: questions left, bought questions, when they open again", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
 }
 CPC_RX = re.compile(r"^[A-HY]\d{2}[A-Z](\s?\d{1,4}/\d{1,6})?$", re.I)
@@ -414,12 +415,12 @@ def run(ctx, tokens):
     opts["_code"] = code
     if opts.get("disclosure"):
         ctx.context = opts["disclosure"]
-    if code in ("PORT",) and subject_text:
+    if code in ("PORT", "USAGE") and subject_text:
         fail(f"{code} is for your whole office; leave out the subject.", f"phaneris {code}")
     if code == "CLS" and CPC_RX.match(subject_text or ""):
         subject = {"kind": "class", "code": subject_text.upper(), "name": subject_text.upper()}
     else:
-        subject = resolve(ctx, subject_text) if code != "PORT" else {"kind": "none"}
+        subject = resolve(ctx, subject_text) if code not in ("PORT", "USAGE") else {"kind": "none"}
     if subject["kind"] == "asked":  # the person chose to ask the whole knowledge graph instead; the answer is shown
         return
     allowed = CODES[code][1]
@@ -1161,6 +1162,17 @@ def screen_graph(ctx, subject):
                 f"In the window: pan, zoom, select, expand (phaneris tui {arg(ident)} GRAPH)."))  # fmt: skip
 
 
+def screen_usage(ctx, subject):
+    """USAGE: the person's plan and limits, the same statement as phaneris usage."""
+    from . import usage as usage_view
+
+    res = ctx.api.get("/account/usage")
+    if ctx.out.as_json:
+        return ctx.out.data(res)
+    for line in usage_view.statement(ctx.s, res):
+        ctx.p(line)
+
+
 SCREENS = {
     "DES": screen_des,
     "OWN": screen_own,
@@ -1174,6 +1186,7 @@ SCREENS = {
     "GRF": screen_grf,
     "ASK": screen_ask,
     "PORT": screen_port,
+    "USAGE": screen_usage,
     "HELP": screen_help,
 }
 
