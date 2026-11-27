@@ -58,13 +58,14 @@ def test_the_bar_opens_screens_in_tabs_and_panes(server, capsys, monkeypatch):  
             assert app.query(tui.WelcomeView)  # with no saved layout, the default opens the welcome pane
             await type_line(pilot, "T-1 SCR")
             await settle(pilot, app)
-            assert "Deal stages" in text_of(app) and len(app.pane().tabs.query("TabPane")) == 2
+            # Welcome, T-1 SCR, and T-1's related graph beside it (once per disclosure)
+            assert "Deal stages" in text_of(app) and len(app.pane().tabs.query("TabPane")) == 3
             await type_line(pilot, "T-1 WHY")
             await settle(pilot, app)
-            assert len(app.pane().tabs.query("TabPane")) == 3
+            assert len(app.pane().tabs.query("TabPane")) == 4
             await pilot.press("ctrl+w")
             await settle(pilot, app)
-            assert len(app.pane().tabs.query("TabPane")) == 2
+            assert len(app.pane().tabs.query("TabPane")) == 3
             await pilot.press("ctrl+n")
             await settle(pilot, app)
             assert len(app.panes()) == 2 and app.focused_pane == 1
@@ -195,7 +196,7 @@ def test_layouts_are_saved_privately_and_restored(server, capsys, monkeypatch): 
     path = tui.layouts_path()
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     saved = json.loads(open(path).read())["default"]
-    assert saved["panes"] == [{"tabs": ["T-1 SCR"]}, {"tabs": ["PORT"]}]
+    assert saved["panes"] == [{"tabs": ["T-1 SCR", "T-1 REL"]}, {"tabs": ["PORT"]}]
     again = make_app(server, capsys, monkeypatch)
 
     async def back():
@@ -511,5 +512,56 @@ def test_ask_on_a_record_with_no_disclosure_open_sends_nothing(server, capsys, m
             text = " ".join(log_of(app.query_one(tui.AskView)).split())
             assert "is not a disclosure, and no disclosure is open, so nothing will be asked here" in text and "/kg QUESTION" in text
             assert not posts("/api/explore")
+
+    run(go())
+
+
+def test_a_disclosure_opens_with_its_related_graph_beside_it(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            board = app.query_one(tui.WelcomeView).query_one(tui.DataTable)
+            board.focus()
+            await pilot.press("enter")  # chosen from the welcome pane
+            await settle(pilot, app)
+            titles = [str(t.label) for t in app.pane().tabs.query("Tab")]
+            assert titles == ["Welcome", "T-1 SCR", "T-1 REL"] and app.tab_lines[app.pane().tabs.active] == "T-1 SCR"
+            assert "Deal stages" in text_of(app)  # the disclosure stays in front; its related graph is the next tab
+            await type_line(pilot, "T-1 WHY")
+            await settle(pilot, app)
+            assert [str(t.label) for t in app.pane().tabs.query("Tab")].count("T-1 REL") == 1  # once per disclosure
+            rel = app.query_one(tui.RelatedView)
+            app.pane().tabs.active = app._tab_of(rel)
+            await settle(pilot, app)
+            tree = rel.query_one(tui.Tree)
+            groups = [str(n.label) for n in tree.root.children]
+            assert groups == ["Patents (10)", "People (1)", "Classes (1)"] and tree.root.children[0].is_expanded
+            people = tree.root.children[1]
+            people.expand()
+            await pilot.pause()
+            tree.focus()
+            tree.move_cursor(people.children[0])
+            await pilot.press("enter")  # a person: its brief, around T-1
+            await settle(pilot, app)
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/record"][-1] == {"node": "inv:a", "disclosure": "T-1"}
+            app.pane().tabs.active = app._tab_of(rel)
+            await settle(pilot, app)
+            classes = tree.root.children[2]
+            classes.expand()
+            await pilot.pause()
+            tree.focus()
+            tree.move_cursor(classes.children[0])
+            await pilot.press("enter")  # a class opens its trends
+            await settle(pilot, app)
+            assert any(str(t.label).startswith("cpc:A01B 1/00 CLS") for t in app.pane().tabs.query("Tab"))
+            app.pane().tabs.active = app._tab_of(rel)
+            await settle(pilot, app)
+            tree.focus()
+            tree.move_cursor(people.children[0])
+            await pilot.press("g")  # the map, still around T-1
+            await settle(pilot, app)
+            assert [x[2] for x in Fake.log if x[1] == "/api/graph/map"][-1].get("disclosure") == "T-1"
 
     run(go())

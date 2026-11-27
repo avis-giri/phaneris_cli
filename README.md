@@ -27,6 +27,8 @@ Type `phaneris` and press Enter: the Phaneris window opens, with a bar at the to
   open. `/kg QUESTION`, `ask --graph QUESTION` or **Ctrl-G** sends it across the **whole knowledge graph** instead.
   The **scope chip** beside the bar shows where Enter will send it ("About T-000003", "Whole knowledge graph", or "No
   disclosure open", when nothing is sent) before anything is sent. Each scope keeps its own conversation.
+- **A disclosure's related knowledge graph** opens as the next tab whenever you open a disclosure (REL): its records
+  grouped by kind with counts, as an expandable tree. Enter opens one; `g` map, `o` timeline, `c` class trends.
 - **Cited records** in an answer are rows: Enter opens one (DES), `g` its map (GRF). A record outside your
   disclosures' reach shows the brief the answer returned and says why it cannot be opened further.
 - **A name you cannot reach** offers "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)"
@@ -136,6 +138,7 @@ phaneris go "T-000003 WHY"     # the same, as one line
 | OWN | Ownership and timeline: filings, grant, assignments, licences, trials, papers, with the disclosure date as a rule and later items marked as hindsight | a disclosure or a record |
 | CLS | Patent class trends: filings by year (a braille line chart), share in force, owners. For a disclosure, the class it is grouped under in the graph | a disclosure, a record or a class |
 | HIST | Score history: each kept version's date, deal chance, full estimate and recommendation, what moved, and why the latest moved (the fitted model's terms in the two latest versions) | a disclosure |
+| REL | Related knowledge graph: the records within the disclosure's reach, grouped by kind with counts (`--all` for every one). In the window it opens as the next tab of any disclosure, as an expandable tree | a disclosure |
 | ASK | A conversation about it | anything |
 | PORT | Your office's board, ranked by deal chance, with a heat row of the nine metrics | your office |
 | HELP | What applies to the subject | anything |

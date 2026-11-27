@@ -155,6 +155,16 @@ MAP = {
 }
 
 
+RELATED = {
+    "id": "T-1", "name": "Test one", "graphs": ["demo"], "per_group": 200,
+    "groups": [
+        {"group": "patents", "count": 10, "records": [{"id": f"pat:{i}", "name": f"Patent {i}", "type": "patent", "graph": "demo",
+                                                        "links": 1} for i in range(10)]},
+        {"group": "people", "count": 1, "records": [{"id": "inv:a", "name": "Ada Shared", "type": "inventor", "graph": "demo", "links": 2}]},
+        {"group": "classes", "count": 1, "records": [{"id": "cpc:A01B 1/00", "name": "A01B 1/00", "type": "cpc_class_pivot", "graph": "demo",
+                                                       "links": 2}]},
+    ],
+}  # fmt: skip
 HISTORY = {
     "id": "T-1",
     "name": "Test one",
@@ -238,6 +248,8 @@ class Fake(BaseHTTPRequestHandler):
             if "disclosure" not in q and Fake.role != "admin":  # like the server: only your disclosures and the codes
                 found = [x for x in found if x["kind"] in ("disclosure", "code")]
             return self._send(200, {"query": q["q"], "suggestions": found})
+        if url.path == "/api/disclosures/T-1/related":
+            return self._send(200, {"related": RELATED})
         if url.path == "/api/disclosures/T-1/history":
             return self._send(200, {"history": HISTORY})
         if url.path == "/api/disclosures/T-1/timeline":
@@ -1155,3 +1167,13 @@ def test_questions_in_the_line_mode_bar(server, capsys, monkeypatch):
     from phaneris_cli import history
 
     assert not [h for h in history.load() if "owns" in h]  # questions are never kept
+
+
+def test_rel_lists_the_related_graph_by_kind(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    out = run(capsys, "T-1", "REL")
+    assert "12 records within its reach" in out and "Patents (10)" in out and "People (1)" in out and "Classes (1)" in out
+    assert "and 2 more: phaneris T-1 REL --all" in out and "Patent 9" not in out
+    assert "Patent 9" in run(capsys, "T-1", "REL", "--all")
+    assert json.loads(run(capsys, "--json", "T-1", "REL"))["groups"][0]["count"] == 10
+    assert "REL does not apply" in failed(capsys, "inv:a", "REL", "--disclosure", "T-1")

@@ -46,6 +46,8 @@ Ask by typing a question: anything that ends with "?", or starts with ask or /as
 
 The scope chip beside the bar shows where Enter will send a question before anything is sent: "About T-000003", "Whole knowledge graph", or "No disclosure open", in which case nothing is sent until you open one or choose the whole graph. Each scope keeps its own conversation in its own tab, with the earlier questions, so a follow-up has context. Questions are never written to the history file.
 
+Open a disclosure (from the bar or the board) and its related knowledge graph opens as the next tab: its records, grouped by kind with counts, as an expandable tree. See: phaneris guide screens (REL).
+
 An answer lists the records it cites as rows: Enter opens one (DES), g opens its map (GRF). Administrators can open any of them. Everyone else can open a record within reach of one of their disclosures; for any other, the window shows the brief the answer returned and says why it cannot be opened further.
 
 A name you cannot reach is never a dead end: the first suggestion is "Ask the whole knowledge graph about 'NAME' (N free whole-graph questions left)". It is sent only when you choose it and press Enter.
@@ -169,11 +171,12 @@ The codes:
   OWN    ownership and timeline, later items as hindsight    phaneris US 8916381 OWN
   CLS    patent class trends                                 phaneris A61K CLS
   HIST   score history: versions, what moved and why         phaneris T-000003 HIST
+  REL    related knowledge graph: its records, by kind       phaneris T-000003 REL
   ASK    a conversation about it                             phaneris T-000003 ASK
   PORT   your office's board                                 phaneris PORT
   HELP   what applies to a subject                           phaneris T-000003 HELP
 
-DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP and HIST to a disclosure; CLS also to a class; PORT to your office.
+DES, GRF and OWN apply to a disclosure or a record; SCR, WHY, CMP, HIST and REL to a disclosure; CLS also to a class; PORT to your office.
 """,
     ),
     (
@@ -202,6 +205,8 @@ OWN. Filings, grant, assignments, licences, trials and papers in date order, wit
 CLS. Filings by year as a line, share in force and the top owners. The yearly counts cover only the years fetched for the class; a line is drawn only across consecutive years, because a missing year is unknown, not zero. For a disclosure, the class it is grouped under in the graph.
 
 PORT. Your office's disclosures ranked by deal chance, with the recommendation, how many of the nine metrics are Real, and a heat row of the nine (in order ipd ms eq ia tf rp fto ta cp: darker is higher, green Real, amber Inferred). There is no board across offices yet, for any account.
+
+REL. A disclosure's related knowledge graph: the records within its reach (the same reach as every lookup about it), grouped by kind with counts: patents, people, owners, classes, trials, grants, papers and your other disclosures, each with how many links it is from the disclosure. Administrators see the same view, so it reads the same for everyone; the whole graph is the /kg question. In the window it opens as the next tab whenever a disclosure is opened, as an expandable tree: Enter opens a record (a class in CLS, one of your disclosures in SCR, anything else in DES), g its map, o its timeline, c its class trends, all within the disclosure's reach.
 
 HIST. Every kept version of a disclosure's score: when it was scored, the deal chance, the full estimate, the recommendation, where it came from (a data import or a re-score) and what moved. Under it, why the latest version moved: the change in each fitted input's push between the two latest versions, shown only when both were scored with the model the site holds.
 """,
@@ -285,6 +290,11 @@ Settings: --server URL or PHANERIS_URL (default https://www.phaneris.co; https, 
   No exact match ... Did you mean    The name found nothing; pick one of the close matches, or use the id.
   No disclosure open                 A question in the window needs an open disclosure, or /kg (Ctrl-G) for the
                                      whole knowledge graph.
+  is not one of your disclosures     Questions are about one of your disclosures. Asking about a person, patent or
+                                     class asks about the disclosure you reached it from; otherwise you are offered
+                                     the whole knowledge graph, and asked before a question is spent.
+  The answer service is busy         Nothing was counted; try again in a minute.
+  Questions are not switched on yet  Nothing was counted; try again later.
   cannot be opened further           A cited record outside your disclosures' reach: its brief is shown; ask the
                                      whole knowledge graph (/kg) for more.
 

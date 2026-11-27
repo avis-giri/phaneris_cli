@@ -18,10 +18,11 @@ from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.suggester import Suggester
-from textual.widgets import DataTable, Input, OptionList, RichLog, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Input, OptionList, RichLog, Static, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
 from . import __version__, history, idle, store, term
@@ -248,6 +249,88 @@ class WelcomeView(BoardView):
             return
         line = "  " + term.allowances_line(usage) + ".  Buying more: Ctrl-B or phaneris buy."
         self.app.call_from_thread(self.query_one(".allowances", Static).update, line)
+
+
+class RelatedView(Vertical):
+    """REL in the window: the disclosure's related knowledge graph as an expandable tree, grouped by kind with counts.
+    Enter opens a record (a class in CLS, one of your disclosures in SCR, anything else in DES); g its map, o its
+    timeline, c its class trends. Everything stays within the disclosure's reach."""
+
+    BINDINGS = [Binding("g", "open('GRF')", "Map"), Binding("o", "open('OWN')", "Timeline"), Binding("c", "open('CLS')", "Class")]
+    DEFAULT_CSS = "RelatedView Tree { height: 1fr; }"
+
+    def __init__(self, line, **kw):
+        super().__init__(**kw)
+        self.line, self.did = line, None
+
+    def compose(self) -> ComposeResult:
+        yield Static("Loading", classes="title")
+        yield Tree("Related knowledge graph")
+
+    def on_mount(self):
+        self.load()
+
+    @work(thread=True)
+    def load(self):
+        ctx = self.app.ctx()
+        subject_text = term.parse(shlex.split(self.line))[0]
+        try:
+            subject = term.resolve(ctx, subject_text)
+            if subject["kind"] != "disclosure":
+                raise term_fail()("REL is for one of your disclosures.")
+            rel = term.related(ctx, subject["id"])
+        except ApiError as e:
+            from .main import explain
+
+            f = explain(e)
+            return self.app.call_from_thread(self._error, f.message + (f"  {f.hint}" if f.hint else ""))
+        except term_fail() as f:
+            return self.app.call_from_thread(self._error, f.message)
+        self.did = subject["id"]
+        self.app.call_from_thread(self._fill, rel)
+
+    def _error(self, message):
+        self.query_one(".title", Static).update(Text(message, style="red"))
+
+    def _fill(self, rel):
+        total = sum(g["count"] for g in rel["groups"])
+        self.query_one(".title", Static).update(
+            Text.from_markup(
+                f"[b]REL[/b]  [b]{rel['name']}[/b]  {rel['id']}  [dim]{total} records within its reach. "
+                "Enter opens one, g map, o timeline, c class trends.[/dim]"
+            )  # fmt: skip
+        )
+        tree = self.query_one(Tree)
+        tree.root.set_label(f"{rel['name']}  {rel['id']}")
+        for i, g in enumerate(rel["groups"]):
+            branch = tree.root.add(f"{g['group'].capitalize()} ({g['count']})", expand=i == 0)
+            for r in g["records"]:
+                links = "linked" if r.get("links") == 1 else f"{r['links']} links out" if r.get("links") else ""
+                branch.add_leaf(f"{(r.get('name') or r['id'])[:70]}  {r['id']}  {links}".rstrip(), data=(r["id"], g["group"]))
+        tree.root.expand()
+        tab = self.app._tab_of(self)
+        if tab and any(p.tabs.active == tab for p in self.app.panes()):  # focusing a widget in a background tab would bring it forward
+            tree.focus()
+
+    def _open(self, data, code=None):
+        node, group = data
+        ctx = self.app.ctx()
+        ctx.context = self.did
+        code = code or term.REL_CODE.get(group, "DES")
+        line = f"{term.arg(node)} {code}" if group == "your other disclosures" else term._line(ctx, node, code)
+        if ctx.role == "admin" and group != "your other disclosures":  # admins: still around this disclosure, like everyone
+            line += f" --disclosure {term.arg(self.did)}"
+        self.app.open_tab(line)
+
+    def on_tree_node_selected(self, event):
+        if event.node.data:
+            event.stop()
+            self._open(event.node.data)
+
+    def action_open(self, code):
+        node = self.query_one(Tree).cursor_node
+        if node is not None and node.data:
+            self._open(node.data, code)
 
 
 class Walker(Horizontal):
@@ -860,17 +943,42 @@ class PhanerisApp(App):
             topic = line[len(":guide") :].strip()
             return self._add_tab(line, f"Guide {topic}".strip(), GuideView(topic), pane)
         subject, code, _ = term.parse(shlex.split(line))
-        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView}
+        views = {"PORT": BoardView, "GRF": Walker, "ASK": AskView, "REL": RelatedView}
         widget = views.get(code, ScreenView)(line)
-        return self._add_tab(line, f"{subject} {code}".strip() if subject else code, widget, pane)
+        tab = self._add_tab(line, f"{subject} {code}".strip() if subject else code, widget, pane)
+        self._related_beside(subject, code, pane, front=tab)
+        return tab
 
-    def _add_tab(self, line, title, widget, pane=None):
+    def _related_beside(self, subject, code, pane=None, front=None):
+        """A disclosure opened in the window gets its related knowledge graph as the next tab (once per disclosure)."""
+        if not subject or code in ("REL", "ASK", "PORT"):
+            return
+        did = self.disclosure_ids.get(subject.lower()) or (subject if code in ("SCR", "WHY", "CMP", "HIST") else None)
+        if not did:
+            return
+        line = f"{term.arg(did)} REL"
+        if line in self.tab_lines.values() or getattr(self, "_loading_layout", False):
+            return
+        target = pane if pane is not None else self.pane()
+        self._tab_n += 1
+        tab_id = f"tab{self._tab_n}"
+        self.tab_lines[tab_id] = line
+
+        async def add_behind():  # once it is in, the disclosure goes back in front (adding a pane can activate it)
+            await target.tabs.add_pane(TabPane(f"{did} REL"[:28], RelatedView(line), id=tab_id))
+            if front and target.tabs.query(f"#{front}"):
+                target.tabs.active = front
+
+        self.call_later(add_behind)
+
+    def _add_tab(self, line, title, widget, pane=None, activate=True):
         self._tab_n += 1
         tab_id = f"tab{self._tab_n}"
         target = pane if pane is not None else self.pane()
         self.tab_lines[tab_id] = line
         target.tabs.add_pane(TabPane(title[:28], widget, id=tab_id))
-        target.tabs.active = tab_id
+        if activate:
+            target.tabs.active = tab_id
         return tab_id
 
     def action_focus_bar(self):
@@ -977,9 +1085,11 @@ class PhanerisApp(App):
 
         def fill():
             self._arrange()
+            self._loading_layout = True  # a saved layout already says which REL tabs it wants
             for pane, lines in zip(self.panes(), wanted, strict=False):
                 for line in lines:
                     self.open_tab(line, pane=pane)
+            self._loading_layout = False
             self._focus(0)
             if not quiet:
                 self.notify(f"Layout {name} loaded.")
@@ -1134,7 +1244,13 @@ class PhanerisApp(App):
         if v is None and parts and parts[0].startswith("Could not reach"):
             parts[0] = "server not answering"
         parts.append(f"server {v or 'not answering'} · phaneris {__version__} · ? help")
-        self.call_from_thread(self.query_one("#status", Static).update, "  ·  ".join(parts))
+        self.call_from_thread(self._set_status, "  ·  ".join(parts))
+
+    def _set_status(self, text):
+        try:
+            self.query_one("#status", Static).update(text)
+        except NoMatches:  # the window is closing, or the screen is locked
+            pass
 
     def server_answered(self):
         """A screen loaded: if the status line said the server was not answering, check again now."""

@@ -113,3 +113,9 @@ def test_the_window_comes_first_and_says_how_to_ask():
                  "100 for $5", "Ctrl-B", "It is sent only when you choose it"):  # fmt: skip
         assert must in body, must
     assert "watch" not in text().lower().replace("names news or watch", "")
+
+
+def test_rel_and_the_question_messages_are_in_the_guide():
+    body = text()
+    assert "REL. A disclosure's related knowledge graph" in body and "Administrators see the same view" in body
+    assert "asked before a question is spent" in body and "Nothing was counted" in body

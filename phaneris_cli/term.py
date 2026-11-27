@@ -26,6 +26,7 @@ CODES = {
     "OWN": ("Ownership and timeline: filings, grant, assignments, licences, trials, papers; later items as hindsight", ("disclosure", "record")),
     "CLS": ("Patent class trends: filings by year, share in force, owners", ("disclosure", "record", "class")),
     "HIST": ("Score history: each version's deal chance and recommendation, what moved and why", ("disclosure",)),
+    "REL": ("Related knowledge graph: the records within its reach, grouped by kind", ("disclosure",)),
     "ASK": ("Ask about it (a conversation)", ("disclosure", "record", "none")),
     "PORT": ("My office's board, ranked by deal chance", ("none",)),
     "HELP": ("What applies here", ("disclosure", "record", "none")),
@@ -1043,11 +1044,41 @@ def _target(subject):
     return subject.get("id") or subject.get("node")
 
 
+REL_SHOWN = 8
+REL_CODE = {"classes": "CLS", "your other disclosures": "SCR"}  # what Enter opens for a group's records (else DES)
+
+
+def related(ctx, did):
+    return ctx.api.get(f"/disclosures/{_quote(did)}/related")["related"]
+
+
+def screen_rel(ctx, subject):
+    """REL: the disclosure's related knowledge graph, the same bounded view for every account."""
+    s = ctx.s
+    rel = related(ctx, subject["id"])
+    if ctx.out.as_json:
+        return ctx.out.data(rel)
+    total = sum(g["count"] for g in rel["groups"])
+    heading(ctx, subject, "REL", f"{total} records within its reach")
+    if not rel["groups"]:
+        ctx.p("Nothing in the knowledge graph is linked to this disclosure yet.")
+    shown = 10**6 if ctx.opts.get("all") else REL_SHOWN
+    for g in rel["groups"]:
+        ctx.p(s.bold(f"{g['group'].capitalize()} ({g['count']})"))
+        for r in g["records"][:shown]:
+            links = "linked" if r.get("links") == 1 else f"{r['links']} links out" if r.get("links") else ""
+            ctx.p(_fit(s, f"  {(r.get('name') or r['id'])[:60]:<60} {s.dim(r['id'])}  {s.dim(links)}"))
+        if g["count"] > min(shown, len(g["records"])):
+            ctx.p(s.dim(f"  and {g['count'] - min(shown, len(g['records']))} more: phaneris {subject['id']} REL --all"))
+    ctx.p(s.dim(f"Open one: phaneris RECORD DES (or GRF, OWN, CLS), around {subject['id']}. The whole graph: phaneris ask --graph"))
+
+
 SCREENS = {
     "DES": screen_des,
     "OWN": screen_own,
     "CLS": screen_cls,
     "HIST": screen_hist,
+    "REL": screen_rel,
     "SCR": screen_scr,
     "WHY": screen_why,
     "CMP": screen_cmp,
