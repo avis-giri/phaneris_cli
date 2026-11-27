@@ -968,7 +968,7 @@ def test_did_you_mean_lists_close_matches_without_a_terminal(server, capsys, mon
     err = failed(capsys, "Ada Shard", "GRF")
     assert ("No exact match for 'Ada Shard'. Did you mean: 1. Ask the whole knowledge graph about 'Ada Shard' (4 free whole-graph "
             "questions left)  2. Ada Shared (person) inv:a  3. Ada Other (person) inv:z") in err  # fmt: skip
-    assert 'phaneris ask --graph "Who or what is Ada Shard?", or the id: phaneris inv:a GRF' in err
+    assert 'Ask the whole knowledge graph: phaneris ask --graph "Who or what is Ada Shard?". Or open a match: phaneris inv:a GRF' in err
     assert not posts("/api/explore")  # listed, never sent without the person choosing it
     assert [x[2] for x in Fake.log if x[1] == "/api/graph/suggest"][-1] == {"q": "Ada Shard", "disclosure": "T-1"}
     with pytest.raises(SystemExit) as e:
@@ -1177,3 +1177,13 @@ def test_rel_lists_the_related_graph_by_kind(server, capsys, monkeypatch):
     assert "Patent 9" in run(capsys, "T-1", "REL", "--all")
     assert json.loads(run(capsys, "--json", "T-1", "REL"))["groups"][0]["count"] == 10
     assert "REL does not apply" in failed(capsys, "inv:a", "REL", "--disclosure", "T-1")
+
+
+def test_out_of_reach_hints_read_plainly(server, capsys, monkeypatch):
+    signed(server, capsys, monkeypatch)
+    run(capsys, "T-1", "DES")
+    err = failed(capsys, "pat:999999", "DES")
+    assert "error: pat:999999 is not within reach around T-1. Instead: 1. Ask the whole knowledge graph" in err  # the id as written
+    assert 'next: Lookups reach what your disclosure connects to. Or: Ask the whole knowledge graph: phaneris ask --graph "Who or what' in err
+    Fake.explore_fail = (503, {"error": "Questions are not switched on yet."})
+    assert "Questions are being set up on this site; try again later." in failed(capsys, "ask", "Hi?", "--disclosure", "T-1")

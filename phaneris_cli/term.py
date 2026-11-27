@@ -245,7 +245,7 @@ def _record(ctx, node, label):
                 label,
                 (
                     f"{label} is not within reach{where}.",
-                    "Lookups reach what your disclosure connects to. Ask across the graph: phaneris ask --graph",
+                    "Lookups reach what your disclosure connects to",
                 ),
             )
         raise
@@ -300,20 +300,20 @@ def _offer(ctx, text, found, what="match", example=None, reason=None):
             ctx.out.data({"error": f"No exact {what} for '{text}'.", "suggestions": found})
         code = ctx.opts.get("_code") or "DES"
         first = next((x for x in found if x["kind"] != "ask"), None)
+        hint = None
         if example is None and found[0]["kind"] == "ask":
-            example = f'a question instead: phaneris ask --graph "{found[0]["id"]}"'
-            if reason and reason[1]:
-                example = f"{reason[1][0].lower()}{reason[1][1:].rstrip('.')}; or {example}"
+            ask = f'Ask the whole knowledge graph: phaneris ask --graph "{found[0]["id"]}"'
+            hint = f"{reason[1].rstrip('.')}. Or: {ask}" if reason and reason[1] else ask
             if first:
-                example += f", or the id: phaneris {arg(first['id'])} {code}"
-        example = example or f"the id, for example: phaneris {arg(found[0]['id'])} {code}"
+                hint += f". Or open a match: phaneris {arg(first['id'])} {code}"
+        hint = hint or "Run it with " + (example or f"the id, for example: phaneris {arg(found[0]['id'])} {code}")
         if what == "code":
             subject = ctx.opts.get("_subject", "")
             choices = [(x["name"], f"{subject} {x['id']}".strip()) for x in found]
         else:
             choices = [(x["name"], f":askkg {x['id']}") if x["kind"] == "ask" else (f"{x['name']}  {x['kind']}  {x['id']}", _line(ctx, x["id"], code))
                        for x in found]  # fmt: skip
-        raise Choose(head + " " + "  ".join(lines), "Run it with " + example, choices)
+        raise Choose(head + " " + "  ".join(lines), hint, choices)
     ctx.p(ctx.s.bold(head))
     for line in lines:
         ctx.p("  " + line)
@@ -336,7 +336,8 @@ def did_you_mean(ctx, text, otherwise=None):
     found = [x for x in suggestions(ctx, text) if x["kind"] != "code"]
     where = f" around {ctx.context}" if ctx.context and ctx.role != "admin" else ""
     message, hint = otherwise or (f'nothing named "{text}" within reach{where}.', 'Try part of the name, or ask: phaneris ask "..."')
-    reason = None if found else (message[0].upper() + message[1:], hint)
+    first_word = message.split(" ", 1)[0]
+    reason = None if found else (message if ":" in first_word or "-" in first_word else message[0].upper() + message[1:], hint)
     if ctx.role != "admin":  # never a dead end: asking the whole graph comes first, sent only if chosen
         found = [ask_offer(ctx, text), *found]
     if not found:

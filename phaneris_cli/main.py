@@ -149,7 +149,9 @@ def explain(e):
         return Fail(e.message, "Run: phaneris login")
     if e.status == 401:
         return Fail(e.message, "Your sign-in may have ended. Run: phaneris login")
-    if e.status in (502, 503):  # the answer service busy, or questions not switched on: nothing was counted
+    if e.status == 503 and "not switched on" in e.message:
+        return Fail(e.message, "Nothing was counted. Questions are being set up on this site; try again later.")
+    if e.status in (502, 503):  # the answer service busy or failing: nothing was counted
         return Fail(e.message, "Nothing was counted. Try again in a minute.")
     if e.code == "two_step_setup_required":
         return Fail(e.message, "Sign in to the console in a browser, set up two-step sign-in, then run: phaneris login")
