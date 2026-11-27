@@ -695,3 +695,15 @@ def test_graph_view_on_a_person_says_two_links_out(server, capsys, monkeypatch):
             assert "Two links out from inv:a" in str(g.query_one("#info").render())
 
     run(go())
+
+
+def test_the_window_greets_like_the_welcome(server, capsys, monkeypatch):  # noqa: F811
+    app = make_app(server, capsys, monkeypatch)
+
+    async def go():
+        async with app.run_test(size=(140, 45)) as pilot:
+            await settle(pilot, app)
+            greeting = str(app.query_one(tui.WelcomeView).query_one(".greeting").render())
+            assert greeting == "Welcome back, Pat.  Aldermoor · Office user · 2 disclosures"
+
+    run(go())

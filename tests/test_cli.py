@@ -1136,6 +1136,7 @@ def test_news_watch_and_feed_were_removed(server, capsys, monkeypatch):
 
 def test_no_words_without_the_window_opens_the_bar_with_a_hint(server, capsys, monkeypatch):
     signed(server, capsys, monkeypatch)
+    monkeypatch.setenv("PHANERIS_NO_WELCOME", "1")  # straight to the bar (the welcome is tested in test_welcome.py)
     monkeypatch.setattr(cli, "tui_available", lambda: False)
     monkeypatch.setattr("sys.stdin", TTY())
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)

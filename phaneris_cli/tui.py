@@ -252,6 +252,7 @@ class WelcomeView(BoardView):
             self.app.open_tab(f"{term.arg(did)} GRAPH")
 
     def compose(self) -> ComposeResult:
+        yield Static("", classes="greeting")
         yield Static(WELCOME, classes="intro")
         yield Static("", classes="allowances")
         yield Static("", classes="title")
@@ -262,6 +263,12 @@ class WelcomeView(BoardView):
 
     @work(thread=True)
     def allowances(self):
+        from . import welcome
+
+        f = welcome.facts(self.app.api)  # the same greeting as the welcome phaneris prints first
+        hello = welcome.one_line(f)
+        if hello:
+            self.app.call_from_thread(self.query_one(".greeting", Static).update, Text(hello, style="bold"))
         try:
             usage = self.app.api.get("/explore/usage")
         except ApiError:
@@ -1037,6 +1044,7 @@ class PhanerisApp(App):
     #bar { margin: 0 0 0 1; width: 1fr; }
     #scope { width: auto; height: 3; padding: 1 1; margin: 0 1 0 0; background: $panel; color: $text; }
     #scope.-graph { background: $accent; color: $text; }
+    WelcomeView .greeting { padding: 0 1; }
     WelcomeView .intro { padding: 0 1; }
     WelcomeView .allowances { padding: 0 1 1 1; color: $text-muted; }
     #suggest { display: none; height: auto; max-height: 12; margin: 0 1; }

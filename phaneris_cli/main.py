@@ -38,6 +38,7 @@ Account
   version               this program's version and the server's
   history [--clear]     what you ran in the command bar, used for Tab suggestions
   tui [SUBJECT CODE]    full-screen mode: panes, tabs, a walkable map (needs the optional extra)
+  welcome [--on]        the welcome phaneris shows first (--on: show it again after "don't show this again")
   guide [TOPIC]         the full guide in the terminal (help TOPIC too; --search WORD)
   doctor                check Python, the server, your sign-in and where it is kept
 
@@ -1017,6 +1018,56 @@ def show_guide(argv):
     guide.page(guide.render(slug, width) + [f"Topics: phaneris guide. On the website: {guide.DOCS}"])
 
 
+def welcome_then_open(args, out, forced=False):
+    """The welcome, then what the person chooses: Enter opens the window (or says how to add it), b the line-mode bar,
+    n turns the welcome off and opens the window, q leaves, and anything else runs as a command."""
+    import shlex
+
+    from . import term, welcome
+
+    s = out.s
+    try:
+        api = signed_in(args)
+    except Fail:
+        for line in welcome.signed_out_lines(s, server_of(args)):
+            print(s.line(line))
+        return
+    f = welcome.facts(api)
+    if f.get("error") is not None:
+        e = f["error"]
+        if e.status == 401:  # the sign-in ended (idle, revoked or expired): the signed-out welcome, with why
+            for line in welcome.signed_out_lines(s, server_of(args)):
+                print(s.line(line))
+            print(s.line(s.dim("  " + e.message)))
+            return
+        Fail_and_exit(out, explain(e))
+    window = tui_available()
+    for line in welcome.lines(s, f, window):
+        print(s.line(line))
+    if not (sys.stdin.isatty() and sys.stdout.isatty()) and not forced:
+        return
+    try:
+        choice = input(s.accent("› ") if s.color else "> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if choice.lower() == "q":
+        return
+    if choice.lower() == "n":
+        welcome.turn_off()
+        print(s.line(s.dim("The welcome is off. Show it again any time: phaneris welcome (phaneris welcome --on turns it back on).")))
+        choice = ""
+    if choice and choice.lower() != "b":  # typed a command straight away
+        return run_functions(["--server", server_of(args), *shlex.split(choice)])
+    if choice == "" and window:
+        return open_tui(args, out, None)
+    if choice == "":
+        print(s.line("The window needs one extra, added once:  " + s.accent("pipx inject phaneris-cli textual")))
+        print(s.line(s.dim('(or: pipx install "phaneris-cli[tui] @ git+https://github.com/avis-giri/phaneris_cli"). For now, the line-mode bar:')))
+    ctx = term.Ctx(api, out, args)
+    return term.command_bar(ctx)
+
+
 def run_functions(argv):
     """`phaneris <SUBJECT> <CODE>`, `phaneris go "<SUBJECT> <CODE>"`, or the command bar with no words."""
     import shlex
@@ -1032,8 +1083,18 @@ def run_functions(argv):
     if words and words[0] in ("watch", "feed"):
         hint = "Score history stays: phaneris T-000003 HIST. See: phaneris guide"
         Fail_and_exit(out, Fail(f"phaneris {words[0]} was removed in 0.7.0, with the what-changed feed.", hint))
+    if words and words[0] == "welcome":  # on demand, even when turned off; --on turns it back on
+        if "--on" in words:
+            remember(welcome=True)
+            print("The welcome is on: phaneris with no words shows it first.")
+            return
+        return welcome_then_open(args, out, forced=True)
     if not words:
         if sys.stdin.isatty() and sys.stdout.isatty() and not args.json:
+            from . import welcome
+
+            if welcome.wanted(args):
+                return welcome_then_open(args, out)
             if tui_available():
                 return open_tui(args, out, None)
             try:
@@ -1060,7 +1121,7 @@ def main(argv=None):
     _, words = global_options(argv)
     if words and (words[0] == "guide" or (words[0] == "help" and len(words) > 1)):
         return show_guide(argv)
-    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui", "watch", "feed"):
+    if not words or (words[0] not in SUBCOMMANDS and not words[0].startswith("-")) or words[0] in ("go", "tui", "watch", "feed", "welcome"):
         return run_functions(argv)
     args = build_parser().parse_args(argv)
     out = Out(args)
