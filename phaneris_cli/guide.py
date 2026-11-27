@@ -19,6 +19,49 @@ DOCS = "https://www.phaneris.co/docs/terminal"
 
 TOPICS = [
     (
+        "start",
+        "Getting started",
+        """
+What it is: phaneris is a small program for your terminal. Type phaneris and the Phaneris window opens: type any disclosure, person, patent or class to open it, or type a question about a disclosure or the whole knowledge graph. It shows exactly what the console shows your account; it adds no access of its own.
+
+Install (Python 3.10 or newer and pipx), with the full-screen window:
+
+  pipx install "phaneris-cli[tui] @ git+https://github.com/avis-giri/phaneris_cli"
+  pipx inject phaneris-cli textual      adds the window to an install without it
+  pipx upgrade phaneris-cli
+
+Sign in: phaneris login asks for your username, your password (not shown) and, if your account uses one, the 6-digit code from your authenticator app. Your password is never stored; the terminal keeps a separate sign-in for at most 30 days. phaneris login --browser approves a code in the console instead.
+
+Open the window: type phaneris with no words. It greets you with your office, your disclosures and your question allowance, then Enter opens the window. n stops showing the greeting; phaneris welcome shows it again.
+
+Ten things to know:
+  phaneris               the greeting, then Enter opens the window
+  T-000003 SCR           open a disclosure, person, patent or class, then a code (no code: what it is)
+  Who invented it?       ask about the disclosure that is open; the chip beside the bar says which
+  /kg QUESTION, Ctrl-G   ask across the whole knowledge graph
+  T-000003 GRAPH, g      the knowledge graph as nodes and edges
+  Tab                    complete from what you ran before
+  ?, ? TOPIC             help, and this guide
+  F2                     usage and limits (phaneris usage)
+  Ctrl-B                 request 100 more questions for $5 (phaneris buy)
+  Ctrl-Q                 leave
+
+Limits:
+  Questions about your disclosures             10 in any 12 hours
+  Questions across the whole knowledge graph   5 free in total
+  After the free ones, both kinds              bought questions: 100 for $5
+  Knowledge graph lookups                      300 an hour
+  New disclosures scored                       25 a day
+  Sign-in                                      ends after 2 minutes without use; a terminal sign-in lasts at most 30 days
+
+More: every topic is listed by phaneris guide; phaneris guide --search WORD finds a word. The website has a short page and the full reference: """
+        + DOCS
+        + " and "
+        + DOCS
+        + """-reference.
+""",
+    ),
+    (
         "window",
         "The Phaneris window",
         """
@@ -58,27 +101,6 @@ Keys: Ctrl-G whole graph on or off, Ctrl-B buy 100 questions, Ctrl-K or / the ba
 """,
     ),
     (
-        "start",
-        "Getting started",
-        """
-The Phaneris command line lets you use Phaneris from a terminal with your own account: your office's disclosures and reports with every score marked Real or Inferred, scoring new disclosures, questions, lookups in the knowledge graph around your disclosures, and score history. It shows exactly what the console shows your account; it adds no access of its own.
-
-Install it with pipx (Python 3.10 or newer, no other dependencies), then sign in:
-
-  pipx install git+https://github.com/avis-giri/phaneris_cli
-  phaneris login
-  phaneris disclosures
-  phaneris T-000003 SCR
-
-Most of the work is done with a subject and a function code: phaneris SUBJECT CODE. The subject is what you want to look at (a disclosure, a patent, a person, an owner, a class); the code is the screen (SCR for scores, WHY for what moves them). See: phaneris guide subjects.
-
-Type phaneris with no words and the Phaneris window opens: type any name, disclosure or question in its bar, and ask about a disclosure or the whole knowledge graph. See: phaneris guide window. (Without the window's extra, phaneris opens the line-mode command bar.) Every command takes --json for scripts.
-
-Topics: phaneris guide (the list), phaneris guide TOPIC, phaneris guide --search WORD. The website has the same guide: """
-        + DOCS
-        + ".",
-    ),
-    (
         "commands",
         "Every command",
         """
@@ -87,6 +109,7 @@ Account
   logout                end this sign-in
   whoami [--banner]     who you are signed in as
   version               this program's version and the server's
+  welcome [--on]        the greeting phaneris shows first (--on: show it again after "don't show this again")
   doctor                check Python, the server, your sign-in and where it is kept
   history [--clear]     what you ran in the command bar, used for Tab suggestions
   tui [SUBJECT CODE]    full-screen mode (needs the optional extra)

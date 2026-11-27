@@ -50,7 +50,7 @@ def test_topics_by_name_alias_and_code():
 def test_guide_and_help_topic_commands(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "80")
     out = run(capsys, "guide")
-    assert "The Phaneris guide (version" in out and out.index("  window     The Phaneris window") < out.index("  start ")
+    assert "The Phaneris guide (version" in out and out.index("  start      Getting started") < out.index("  window ")
     assert "Reading the screens" in run(capsys, "help", "screens") and "Deal stages" not in run(capsys, "help", "questions")
     assert "HIST. Every kept version" in run(capsys, "guide", "hist")
     assert 'no topic "nonsense"' in failed(capsys, "guide", "nonsense")
@@ -106,7 +106,7 @@ def test_who_reaches_what():
 
 
 def test_the_window_comes_first_and_says_how_to_ask():
-    assert guide.TOPICS[0][0] == "window"
+    assert [s for s, _, _ in guide.TOPICS[:2]] == ["start", "window"]  # the short page first, then the window in detail
     body = guide.SLUGS["window"][1]
     for must in ("Type phaneris and press Enter", "pipx inject phaneris-cli textual", "/kg QUESTION", "Ctrl-G", "scope chip",
                  "About T-000003", "Whole knowledge graph", "Questions: 8 of 10 free about disclosures, 4 of 5 whole graph, 0 bought",
@@ -127,3 +127,13 @@ def test_the_graph_view_is_in_the_guide():
                  "150 records", "300 at most", "one lookup", "never another institution's disclosures", "G (with the cited records"):  # fmt: skip
         assert must in body, must
     assert guide.find("graph") == "graph" and guide.find("GRAPH") == "graph"
+
+
+def test_the_first_topic_mirrors_the_short_web_page():
+    body = guide.SLUGS["start"][1]
+    order = ["What it is", "Install", "Sign in", "Open the window", "Ten things to know", "Limits", "More"]
+    assert [body.index(x) for x in order] == sorted(body.index(x) for x in order)
+    things = body.split("Ten things to know:")[1].split("Limits:")[0]
+    assert len([line for line in things.splitlines() if line.startswith("  ")]) == 10
+    for fact in ("10 in any 12 hours", "5 free in total", "100 for $5", "300 an hour", "25 a day", "2 minutes", "30 days", "terminal-reference"):
+        assert fact in body, fact

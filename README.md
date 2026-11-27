@@ -5,11 +5,15 @@ Real or Inferred, scoring new disclosures, questions about a disclosure or the w
 the knowledge graph around your disclosures. You see and do exactly what the console allows your account; the
 command line adds no access of its own.
 
-Full documentation: https://www.phaneris.co/docs/terminal
+Documentation: https://www.phaneris.co/docs/terminal (a few minutes, with screenshots) and the full reference at
+https://www.phaneris.co/docs/terminal-reference. The same is in your terminal: `phaneris guide`.
 
 ## The Phaneris window
 
-Type `phaneris` and press Enter: the Phaneris window opens, with a bar at the top, panes below and a status line.
+Type `phaneris` and press Enter. It greets you first (your office, your disclosures and a question meter, with a
+warning when it is low), then Enter opens the Phaneris window: a bar at the top, panes below and a status line. `n` at
+the greeting stops showing it; `phaneris welcome` shows it again (`--on` turns it back on). Scripts, `--json` and
+`PHANERIS_NO_WELCOME=1` never see it.
 
 ```text
  A name, disclosure or question, then Enter.                               About T-000003
